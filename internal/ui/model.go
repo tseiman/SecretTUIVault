@@ -65,9 +65,11 @@ type Model struct {
 	detail         viewport.Model
 	form           formModel
 	tagOptions     []string
+	tagOrder       []string
 	tagSelected    map[string]bool
 	tagCursor      int
 	tagOffset      int
+	tagAscending   bool
 	newTag         textinput.Model
 	mode           mode
 	returnMode     mode
@@ -88,7 +90,7 @@ func New(doc vault.Document, store saver) Model {
 	q.Prompt = "Search: "
 	q.Placeholder = `text, TAG:value, NAME:"words", AND`
 	d := viewport.New(40, 10)
-	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
+	m := Model{doc: doc, store: store, ascending: true, tagAscending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
 	m.refresh("")
 	return m
 }
@@ -334,8 +336,30 @@ func (m *Model) openTagPicker() {
 			m.tagOptions = append(m.tagOptions, tag)
 		}
 	}
-	m.tagCursor, m.tagOffset = 0, 0
+	m.tagOrder = append([]string(nil), m.tagOptions...)
+	m.sortTagOptions("")
 	m.mode, m.status = modeTags, ""
+}
+
+func (m *Model) sortTagOptions(preserve string) {
+	sort.SliceStable(m.tagOptions, func(i, j int) bool {
+		left, right := strings.ToLower(m.tagOptions[i]), strings.ToLower(m.tagOptions[j])
+		if left == right {
+			left, right = m.tagOptions[i], m.tagOptions[j]
+		}
+		if m.tagAscending {
+			return left < right
+		}
+		return left > right
+	})
+	m.tagCursor, m.tagOffset = 0, 0
+	for i, tag := range m.tagOptions {
+		if preserve != "" && strings.EqualFold(tag, preserve) {
+			m.tagCursor = i
+			break
+		}
+	}
+	m.ensureTagVisible()
 }
 
 func (m *Model) updateTags(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -359,8 +383,8 @@ func (m *Model) updateTags(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.tagSelected[key] = !m.tagSelected[key]
 		}
 	case tea.KeyEnter:
-		selected := make([]string, 0, len(m.tagOptions))
-		for _, tag := range m.tagOptions {
+		selected := make([]string, 0, len(m.tagOrder))
+		for _, tag := range m.tagOrder {
 			if m.tagSelected[strings.ToLower(tag)] {
 				selected = append(selected, tag)
 			}
@@ -370,7 +394,14 @@ func (m *Model) updateTags(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode = modeForm
 		m.focusForm()
 	case tea.KeyRunes:
-		if strings.EqualFold(key.String(), "n") {
+		if strings.EqualFold(key.String(), "s") {
+			preserve := ""
+			if len(m.tagOptions) > 0 {
+				preserve = m.tagOptions[m.tagCursor]
+			}
+			m.tagAscending = !m.tagAscending
+			m.sortTagOptions(preserve)
+		} else if strings.EqualFold(key.String(), "n") {
 			input := textinput.New()
 			input.KeyMap.Paste.SetEnabled(false)
 			input.Prompt = "New tag: "
@@ -418,11 +449,12 @@ func (m *Model) updateNewTag(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		if found < 0 {
 			m.tagOptions = append(m.tagOptions, canonical)
-			found = len(m.tagOptions) - 1
+			m.tagOrder = append(m.tagOrder, canonical)
+		} else {
+			canonical = m.tagOptions[found]
 		}
-		m.tagSelected[strings.ToLower(m.tagOptions[found])] = true
-		m.tagCursor = found
-		m.ensureTagVisible()
+		m.tagSelected[strings.ToLower(canonical)] = true
+		m.sortTagOptions(canonical)
 		m.mode, m.status = modeTags, ""
 		return *m, nil
 	}
@@ -699,7 +731,11 @@ func (m Model) View() string {
 		if len(rows) == 0 {
 			rows = append(rows, "No existing tags")
 		}
-		return m.fitView(header + "\n" + m.renderModal("Select tags\n\n"+strings.Join(rows, "\n")+"\n\n↑↓ Move • Space Toggle • N New • Enter Apply • Esc Cancel"))
+		tagSort := "A-Z"
+		if !m.tagAscending {
+			tagSort = "Z-A"
+		}
+		return m.fitView(header + "\n" + m.renderModal("Select tags (Sort: "+tagSort+")\n\n"+strings.Join(rows, "\n")+"\n\n↑↓ Move • Space Toggle • S Sort • N New • Enter Apply • Esc Cancel"))
 	case modeNewTag:
 		return m.fitView(header + "\n" + m.renderModal("Create tag\n"+m.newTag.View()+"\nEnter Add • Esc Back\n"+status))
 	case modeQuitConfirm:

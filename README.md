@@ -11,7 +11,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 - Split list/detail view with full record details
 - Create, view, edit, and delete entries
 - Stable random UUIDv4 identifiers
-- Case-insensitive canonical tags
+- Case-insensitive canonical tags with an A-Z/Z-A tag-picker view
 - Name sorting in ascending or descending order
 - Fuzzy metadata search with field filters, quoted terms, OR, and AND
 - Conflict prompt before overwriting an externally changed vault
@@ -106,7 +106,7 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `Esc`, then `3` / `4` / `5` / `8` / `0`: alternatives for `F3` / `F4` / `F5` / `F8` / `F10` (Midnight Commander style)
 - `S`: switch the `Sort: Name ↑` / `Sort: Name ↓` indicator before the search field between name A–Z and Z–A; this UI state is not stored in the vault YAML
 - `Tab` / `Shift+Tab`: move between form fields
-- `Ctrl+T`: choose existing tags or create a new tag while editing
+- `Ctrl+T`: choose existing tags or create a new tag while editing; the picker starts A-Z and `S` switches between A-Z and Z-A without changing stored tag order
 - `Ctrl+S`: save a form
 - `Esc`: close or cancel the current view/dialog
 

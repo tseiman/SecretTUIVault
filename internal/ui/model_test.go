@@ -3,6 +3,7 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -338,6 +339,37 @@ func TestEveryModeFitsNarrowTerminal(t *testing.T) {
 			modal.tagOptions = []string{"Linux", "Windows", "Recovery"}
 			assertFits(label, modal)
 		}
+	}
+}
+
+func TestTagPickerSortsAlphabeticallyAndTogglesWithoutChangingTagOrder(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Tags = []string{"Zulu", "alpha"}
+	doc.Entries[1].Tags = []string{"Beta"}
+	original := append([]string(nil), doc.Entries[0].Tags...)
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF4})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlT})
+	if got := strings.Join(m.tagOptions, ","); got != "alpha,Beta,Zulu" {
+		t.Fatalf("initial tag order=%q, want A-Z", got)
+	}
+	if !strings.Contains(m.View(), "Sort: A-Z") || !strings.Contains(m.View(), "S Sort") {
+		t.Fatalf("tag sort control missing: %q", m.View())
+	}
+	cursorTag := m.tagOptions[m.tagCursor]
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'s'}})
+	if got := strings.Join(m.tagOptions, ","); got != "Zulu,Beta,alpha" {
+		t.Fatalf("descending tag order=%q, want Z-A", got)
+	}
+	if m.tagOptions[m.tagCursor] != cursorTag || !strings.Contains(m.View(), "Sort: Z-A") {
+		t.Fatalf("sort lost cursor tag or indicator: cursor=%q view=%q", m.tagOptions[m.tagCursor], m.View())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if got := m.form.tags.Value(); got != "Zulu, alpha" {
+		t.Fatalf("display sort changed form tag order: %q", got)
+	}
+	if !reflect.DeepEqual(m.doc.Entries[0].Tags, original) {
+		t.Fatalf("display sort changed document tags: %v", m.doc.Entries[0].Tags)
 	}
 }
 
