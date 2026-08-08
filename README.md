@@ -8,7 +8,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 ## Features
 
 - Single, Git-friendly YAML vault
-- Split list/detail view with light parameter labels and a cyan selected-name value
+- Split list/detail view with light parameter labels, a cyan selected-name value, and directional overflow indicators
 - Create, view, edit, and delete entries
 - Stable random UUIDv4 identifiers
 - Case-insensitive canonical tags with an A-Z/Z-A tag-picker view
@@ -109,6 +109,8 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `Ctrl+T`: choose existing tags or create a new tag while editing; the picker starts A-Z and `S` switches between A-Z and Z-A without changing stored tag order
 - `Ctrl+S`: save a form
 - `Esc`: close or cancel the current view/dialog
+
+The `Entries` panel always reserves an `↑` line above and a `↓` line below its visible rows. An arrow is gray at the corresponding boundary and turns cyan when additional entries exist beyond that edge.
 
 All available keyboard actions are rendered as individual bold, true-black-on-cyan blocks in the main footer and in view, edit, create, tag, delete, conflict, and confirmation screens. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
 

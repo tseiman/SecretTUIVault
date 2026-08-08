@@ -352,6 +352,38 @@ func TestLongListScrollsSelectedEntryIntoView(t *testing.T) {
 	}
 }
 
+func TestEntryListScrollIndicatorsReflectHiddenRows(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	doc := vault.Document{Version: vault.SchemaVersion}
+	for i := 0; i < 12; i++ {
+		entry, err := vault.NewEntry(fmt.Sprintf("Entry %02d", i), "description", nil, "blob", nil, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		doc.Entries = append(doc.Entries, entry)
+	}
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 16})
+	if got := m.View(); !strings.Contains(got, scrollInactiveStyle.Render("↑")) || !strings.Contains(got, scrollActiveStyle.Render("↓")) {
+		t.Fatalf("initial indicators do not show hidden rows below: %q", got)
+	}
+
+	for i := 0; i <= m.listPageSize(); i++ {
+		m.move(1)
+	}
+	if got := m.View(); !strings.Contains(got, scrollActiveStyle.Render("↑")) || !strings.Contains(got, scrollActiveStyle.Render("↓")) {
+		t.Fatalf("middle indicators are not both active: %q", got)
+	}
+
+	for m.selected < len(m.visible)-1 {
+		m.move(1)
+	}
+	if got := m.View(); !strings.Contains(got, scrollActiveStyle.Render("↑")) || !strings.Contains(got, scrollInactiveStyle.Render("↓")) {
+		t.Fatalf("bottom indicators do not show hidden rows above: %q", got)
+	}
+}
+
 func TestNarrowAndLongListViewFitsTerminal(t *testing.T) {
 	doc := vault.Document{Version: vault.SchemaVersion}
 	for i := 0; i < 40; i++ {

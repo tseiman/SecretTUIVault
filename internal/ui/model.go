@@ -633,7 +633,7 @@ func (m *Model) move(delta int) {
 	m.updateDetail()
 }
 
-func (m *Model) listPageSize() int { return max(1, m.height-11) }
+func (m *Model) listPageSize() int { return max(1, m.height-13) }
 
 func (m *Model) ensureSelectedVisible() {
 	if len(m.visible) == 0 {
@@ -771,11 +771,12 @@ func (m Model) View() string {
 	if narrow {
 		listWidth = max(12, m.width)
 	}
+	page := m.listPageSize()
 	var rows []string
 	if len(m.visible) == 0 {
 		rows = []string{"No matching entries"}
 	} else {
-		end := min(len(m.visible), m.listOffset+m.listPageSize())
+		end := min(len(m.visible), m.listOffset+page)
 		for i := m.listOffset; i < end; i++ {
 			entry := m.visible[i]
 			prefix := "  "
@@ -786,7 +787,18 @@ func (m Model) View() string {
 			rows = append(rows, line)
 		}
 	}
-	left := borderStyle.Width(max(8, listWidth-2)).Height(max(3, m.height-9)).Render(fmt.Sprintf("Entries (%d)\n%s", len(m.visible), strings.Join(rows, "\n")))
+	upStyle := scrollInactiveStyle
+	if m.listOffset > 0 {
+		upStyle = scrollActiveStyle
+	}
+	downStyle := scrollInactiveStyle
+	if m.listOffset+page < len(m.visible) {
+		downStyle = scrollActiveStyle
+	}
+	listContent := []string{fmt.Sprintf("Entries (%d)", len(m.visible)), upStyle.Render("↑")}
+	listContent = append(listContent, rows...)
+	listContent = append(listContent, downStyle.Render("↓"))
+	left := borderStyle.Width(max(8, listWidth-2)).Height(max(3, m.height-9)).Render(strings.Join(listContent, "\n"))
 	right := borderStyle.Width(max(8, detailWidth-2)).Height(max(3, m.height-9)).Render("Details\n" + m.detail.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 	if narrow {
