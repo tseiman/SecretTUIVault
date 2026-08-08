@@ -1,13 +1,15 @@
 BINARY := secretvault
 DIST := dist
 GO ?= go
+VERSION ?= $(shell git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD 2>/dev/null || printf dev)
+LDFLAGS := -X github.com/tseiman/SecretTUIVault/internal/ui.buildVersion=$(VERSION)
 
 .PHONY: all build test race vet fmt-check check cross-build clean
 
 all: check build
 
 build:
-	$(GO) build -trimpath -o $(BINARY) ./cmd/secretvault
+	$(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(BINARY) ./cmd/secretvault
 
 test:
 	$(GO) test ./...
@@ -26,12 +28,12 @@ check: fmt-check test race vet
 
 cross-build: clean
 	mkdir -p $(DIST)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -o $(DIST)/secretvault-linux-amd64 ./cmd/secretvault
-	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -o $(DIST)/secretvault-linux-arm64 ./cmd/secretvault
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -o $(DIST)/secretvault-darwin-amd64 ./cmd/secretvault
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -o $(DIST)/secretvault-darwin-arm64 ./cmd/secretvault
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -o $(DIST)/secretvault-windows-amd64.exe ./cmd/secretvault
-	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $(GO) build -trimpath -o $(DIST)/secretvault-windows-arm64.exe ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-linux-amd64 ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=linux GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-linux-arm64 ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-darwin-amd64 ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-darwin-arm64 ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-windows-amd64.exe ./cmd/secretvault
+	CGO_ENABLED=0 GOOS=windows GOARCH=arm64 $(GO) build -trimpath -ldflags "$(LDFLAGS)" -o $(DIST)/secretvault-windows-arm64.exe ./cmd/secretvault
 
 clean:
 	rm -rf $(DIST) $(BINARY)

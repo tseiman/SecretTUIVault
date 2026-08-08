@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/atotto/clipboard"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -21,6 +22,11 @@ type saver interface {
 	Save(vault.Document, bool) error
 }
 type mode uint8
+
+type clipboardResultMsg struct {
+	value string
+	err   error
+}
 
 const (
 	modeList mode = iota
@@ -49,29 +55,31 @@ type formModel struct {
 }
 
 type Model struct {
-	doc          vault.Document
-	store        saver
-	visible      []vault.Entry
-	selected     int
-	listOffset   int
-	ascending    bool
-	query        textinput.Model
-	detail       viewport.Model
-	form         formModel
-	tagOptions   []string
-	tagSelected  map[string]bool
-	tagCursor    int
-	tagOffset    int
-	newTag       textinput.Model
-	mode         mode
-	returnMode   mode
-	escapePrefix bool
-	pending      *vault.Document
-	status       string
-	width        int
-	height       int
-	gitVersion   string
-	now          func() time.Time
+	doc            vault.Document
+	store          saver
+	visible        []vault.Entry
+	selected       int
+	listOffset     int
+	ascending      bool
+	query          textinput.Model
+	detail         viewport.Model
+	form           formModel
+	tagOptions     []string
+	tagSelected    map[string]bool
+	tagCursor      int
+	tagOffset      int
+	newTag         textinput.Model
+	mode           mode
+	returnMode     mode
+	escapePrefix   bool
+	pending        *vault.Document
+	status         string
+	width          int
+	height         int
+	gitVersion     string
+	writeClipboard func(string) error
+	manualBlob     string
+	now            func() time.Time
 }
 
 func New(doc vault.Document, store saver) Model {
@@ -80,7 +88,7 @@ func New(doc vault.Document, store saver) Model {
 	q.Prompt = "Search: "
 	q.Placeholder = `text, TAG:value, NAME:"words", AND`
 	d := viewport.New(40, 10)
-	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), now: time.Now}
+	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
 	m.refresh("")
 	return m
 }
@@ -88,6 +96,17 @@ func New(doc vault.Document, store saver) Model {
 func (m Model) Init() tea.Cmd { return nil }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if result, ok := msg.(clipboardResultMsg); ok {
+		if result.err == nil {
+			m.status = "In Zwischenablage kopiert"
+			return m, nil
+		}
+		m.status = fmt.Sprintf("Zwischenablage nicht verfügbar: %v; manueller Kopiermodus geöffnet", result.err)
+		m.manualBlob = result.value
+		m.mode = modeBlobCopy
+		m.resizeWidgets()
+		return m, nil
+	}
 	if size, ok := msg.(tea.WindowSizeMsg); ok {
 		m.width, m.height = max(20, size.Width), max(8, size.Height)
 		m.resizeWidgets()
@@ -158,8 +177,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if strings.EqualFold(key.String(), "b") {
 			m.returnMode = modeView
-			m.mode = modeBlobCopy
-			return m, nil
+			return m, m.copyBlobCmd()
 		}
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(key)
@@ -167,6 +185,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeBlobCopy:
 		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || strings.EqualFold(key.String(), "b") {
 			m.mode = m.returnMode
+			m.manualBlob = ""
 			m.resizeWidgets()
 		}
 		return m, nil
@@ -215,8 +234,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "b", "B":
 			if len(m.visible) > 0 {
 				m.returnMode = modeList
-				m.mode = modeBlobCopy
-				m.resizeWidgets()
+				return m, m.copyBlobCmd()
 			}
 		case "s", "S":
 			id := m.selectedID()
@@ -240,6 +258,14 @@ func escapeFunctionKey(key tea.KeyMsg) (tea.KeyMsg, bool) {
 	}
 	keyType, ok := aliases[key.Runes[0]]
 	return tea.KeyMsg{Type: keyType}, ok
+}
+
+func (m Model) copyBlobCmd() tea.Cmd {
+	value := m.selectedEntry().Blob
+	write := m.writeClipboard
+	return func() tea.Msg {
+		return clipboardResultMsg{value: value, err: write(value)}
+	}
 }
 
 func (m *Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -678,9 +704,13 @@ func (m Model) View() string {
 	case modeQuitConfirm:
 		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\nQ/Y Quit • Enter/Esc/C Continue editing"))
 	case modeView:
-		return m.fitView(header + "\n" + m.renderModal("View entry\n\n"+m.detail.View()+"\n\n↑↓ Scroll • B Copy blob • Esc/Enter Close"))
+		viewFooter := "↑↓ Scroll • B Copy blob • Esc/Enter Close"
+		if status != "" {
+			viewFooter = status + "\n\n" + viewFooter
+		}
+		return m.fitView(header + "\n" + m.renderModal("View entry\n\n"+m.detail.View()+"\n\n"+viewFooter))
 	case modeBlobCopy:
-		return safeMultiline(m.selectedEntry().Blob)
+		return safeMultiline(m.manualBlob)
 	}
 	narrow := m.width < 60
 	listWidth := max(16, m.width/3)
@@ -715,10 +745,11 @@ func (m Model) View() string {
 func (m Model) renderHeader() string {
 	width := max(1, m.width)
 	left := titleStyle.Render("SecretTUIVault")
-	right := m.gitVersion
-	if right == "" {
-		right = "dev"
+	version := m.gitVersion
+	if version == "" {
+		version = "dev"
 	}
+	right := "Git version: " + version
 	rightWidth := lipgloss.Width(right)
 	if rightWidth >= width {
 		return ansi.Truncate(right, width, "…")

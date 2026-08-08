@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['*']
   pull_request:
 
 permissions:
@@ -17,17 +18,27 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
           cache: true
-      - run: go test ./...
+      - name: Test
+        env:
+          # macOS exposes its default temporary directory below /var, which is
+          # a system symlink. Use the canonical runner directory so security
+          # tests can continue rejecting symlinked vault path components.
+          TMPDIR: ${{ runner.temp }}
+        run: go test ./...
       - run: go vet ./...
 
   race-and-cross-build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod

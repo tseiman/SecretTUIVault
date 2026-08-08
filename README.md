@@ -16,7 +16,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 - Fuzzy metadata search with field filters, quoted terms, OR, and AND
 - Conflict prompt before overwriting an externally changed vault
 - Atomic saves, one previous-version backup, and restrictive Unix permissions
-- No server, database, runtime network access, telemetry, clipboard integration, or GPG integration
+- No server, database, runtime network access, telemetry, or GPG integration; optional local clipboard copy with a manual fallback
 - Builds for Linux, macOS, and Windows
 
 ## Requirements
@@ -24,13 +24,14 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 - Go 1.26 or newer to build from source
 - A UTF-8 terminal with color and function-key support
 - GPG is optional and external; SecretTUIVault never calls it
+- Clipboard copy on Linux/Unix needs `wl-clipboard` (`wl-copy`/`wl-paste`) on Wayland or `xclip`/`xsel` on X11. macOS and Windows need no additional clipboard package.
 
 ## Installation from source
 
 ```console
 git clone git@github.com:tseiman/SecretTUIVault.git
 cd SecretTUIVault
-go build -trimpath ./cmd/secretvault
+make build
 ```
 
 Install the binary somewhere on your `PATH`, for example on Linux or macOS:
@@ -59,6 +60,8 @@ This produces binaries for:
 - Linux: `amd64`, `arm64`
 - macOS: `amd64`, `arm64`
 - Windows: `amd64`, `arm64`
+
+`make build` and `make cross-build` embed the exact Git tag when `HEAD` is tagged; otherwise they embed the short commit hash. The TUI shows it as `Git version: <tag-or-hash>`. A direct `go build` can recover the VCS hash from Go build information but cannot infer a local Git tag reliably.
 
 Build and verify the current platform:
 
@@ -95,7 +98,7 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `↑` / `↓`: select an entry
 - `/`: focus search
 - `Enter` or `F3`: open the complete selected entry in a view up to 80 columns wide
-- `B` in the main or F3 view: show only the selected blob without borders or metadata for clean terminal selection; `B`, `Esc`, or `Enter` returns to the previous view
+- `B` in the main or F3 view: copy the exact selected blob to the operating-system clipboard. Success is reported in the status line. If clipboard access fails, a borderless blob-only view opens for manual selection; `B`, `Esc`, or `Enter` returns to the previous view.
 - `F4`: edit the selected entry
 - `F5`: create an entry
 - `F8`: open deletion confirmation; only `Y` deletes, while `N` or `Esc` cancels (`Enter` does nothing)
@@ -107,7 +110,9 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `Ctrl+S`: save a form
 - `Esc`: close or cancel the current view/dialog
 
-The footer always shows the primary actions. Terminal bracketed paste can be used in multiline description and blob fields; SecretTUIVault does not read the operating-system clipboard itself.
+The footer always shows the primary actions. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
+
+On Linux/Unix, a missing or unusable `wl-copy`, `xclip`, or `xsel` command is reported after returning from the automatic borderless fallback view. Install the clipboard utility appropriate for the active desktop session and ensure its display environment (`WAYLAND_DISPLAY` or `DISPLAY`) is available.
 
 ## Search language
 
@@ -172,6 +177,7 @@ The YAML file is intentionally readable and diff-friendly, but edit it carefully
 - Encryption is entirely the user's responsibility.
 - Metadata and tags are plaintext.
 - Blob content is opaque; plaintext is accepted if supplied.
+- Pressing `B` sends the exact blob to the operating-system clipboard. Clipboard managers, history, synchronization, and other applications may retain or read it; use this feature only when that exposure is acceptable.
 - The complete selected blob is displayed in the terminal.
 - Shell history, terminal scrollback, screenshots, backups, Git history, and filesystem copies remain outside the application's control.
 - A backup contains the complete previous vault and needs the same protection.

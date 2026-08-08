@@ -44,8 +44,8 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 	if width := lipgloss.Width(header); width != 80 {
 		t.Fatalf("header width=%d, want 80: %q", width, header)
 	}
-	if !strings.HasSuffix(header, "0ea17c7") {
-		t.Fatalf("Git version is not right-aligned: %q", header)
+	if !strings.HasSuffix(header, "Git version: 0ea17c7") {
+		t.Fatalf("Git version is not labeled and right-aligned: %q", header)
 	}
 	if strings.Contains(header, "Sort:") || strings.Contains(header, "Name ↑") {
 		t.Fatalf("sort indicator must not be in header: %q", header)
@@ -438,8 +438,10 @@ func TestF3BlobCopyViewContainsOnlyDisplaySafeBlob(t *testing.T) {
 	doc := uiDocument(t)
 	doc.Entries[0].Blob = "-----BEGIN PGP MESSAGE-----\rComment: placeholder\r\rbody\n"
 	m := New(doc, &fakeSaver{})
+	m.writeClipboard = func(string) error { return errors.New("clipboard unavailable") }
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ = update(m, cmd())
 	want := safeMultiline(doc.Entries[0].Blob)
 	if got := m.View(); got != want {
 		t.Fatalf("copy view contains chrome or changed display text:\ngot  %q\nwant %q", got, want)
@@ -454,13 +456,65 @@ func TestBOpensBlobCopyViewDirectlyFromMainView(t *testing.T) {
 	doc := uiDocument(t)
 	doc.Entries[0].Blob = "copy-only blob\n"
 	m := New(doc, &fakeSaver{})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m.writeClipboard = func(string) error { return errors.New("clipboard unavailable") }
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ = update(m, cmd())
 	if got := m.View(); got != doc.Entries[0].Blob {
 		t.Fatalf("B did not open direct blob copy view: %q", got)
 	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeList {
 		t.Fatalf("Esc returned to mode=%v, want main view", m.mode)
+	}
+	if !strings.Contains(m.View(), "Zwischenablage nicht verfügbar") {
+		t.Fatalf("clipboard failure missing from status line: %q", m.View())
+	}
+}
+
+func TestBCopiesExactBlobWithoutOpeningManualView(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "opaque\r\nblob\rbytes"
+	m := New(doc, &fakeSaver{})
+	copied := ""
+	m.writeClipboard = func(value string) error {
+		copied = value
+		return nil
+	}
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	if cmd == nil {
+		t.Fatal("B did not start clipboard write")
+	}
+	m, _ = update(m, cmd())
+	if copied != doc.Entries[0].Blob {
+		t.Fatalf("clipboard value changed: got %q want %q", copied, doc.Entries[0].Blob)
+	}
+	if m.mode != modeList || m.status != "In Zwischenablage kopiert" {
+		t.Fatalf("successful copy mode=%v status=%q", m.mode, m.status)
+	}
+}
+
+func TestClipboardFallbackKeepsOriginallySelectedBlob(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "first blob"
+	doc.Entries[1].Blob = "second blob"
+	m := New(doc, &fakeSaver{})
+	m.writeClipboard = func(string) error { return errors.New("clipboard unavailable") }
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m.selected = 1
+	m, _ = update(m, cmd())
+	if got := m.View(); got != "first blob" {
+		t.Fatalf("fallback blob changed with selection: %q", got)
+	}
+}
+
+func TestF3ClipboardSuccessStaysInViewAndShowsStatus(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m.writeClipboard = func(string) error { return nil }
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	m, _ = update(m, cmd())
+	if m.mode != modeView || !strings.Contains(m.View(), "In Zwischenablage kopiert") {
+		t.Fatalf("F3 clipboard success mode=%v view=%q", m.mode, m.View())
 	}
 }
 
