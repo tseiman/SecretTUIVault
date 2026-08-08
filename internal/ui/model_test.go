@@ -369,6 +369,38 @@ func TestCommittedWarningStillUpdatesInMemoryDocument(t *testing.T) {
 	}
 }
 
+func TestF3ViewFitsEightyColumnsAndKeepsArmorLinesUnwrapped(t *testing.T) {
+	doc := uiDocument(t)
+	armorLine := strings.Repeat("A", 65)
+	doc.Entries[0].Blob = armorLine + "\n"
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 35})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
+	view := m.View()
+	if width := lipgloss.Width(view); width > 80 {
+		t.Fatalf("F3 view width=%d exceeds 80 columns", width)
+	}
+	if !strings.Contains(view, armorLine) {
+		t.Fatalf("65-character armor line was wrapped:\n%s", view)
+	}
+}
+
+func TestF3BlobCopyViewContainsOnlyDisplaySafeBlob(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "-----BEGIN PGP MESSAGE-----\rComment: placeholder\r\rbody\n"
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	want := safeMultiline(doc.Entries[0].Blob)
+	if got := m.View(); got != want {
+		t.Fatalf("copy view contains chrome or changed display text:\ngot  %q\nwant %q", got, want)
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeView {
+		t.Fatalf("Esc from copy view mode=%v, want F3 view", m.mode)
+	}
+}
+
 func TestCarriageReturnsRenderAsLineBreaksInSplitAndF3Views(t *testing.T) {
 	doc := uiDocument(t)
 	doc.Entries[0].Blob = "\r-----BEGIN PGP MESSAGE-----\rComment: placeholder\r\rbody"

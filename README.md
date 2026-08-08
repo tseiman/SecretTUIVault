@@ -94,7 +94,8 @@ The parent directory and vault file are created on the first save. On Unix-like 
 
 - `↑` / `↓`: select an entry
 - `/`: focus search
-- `Enter` or `F3`: open the complete selected entry
+- `Enter` or `F3`: open the complete selected entry in a view up to 80 columns wide
+- `B` in the F3 view: show only the blob without borders or metadata for clean terminal selection; `B`, `Esc`, or `Enter` returns
 - `F4`: edit the selected entry
 - `F5`: create an entry
 - `F8`: delete after confirmation

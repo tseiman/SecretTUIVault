@@ -25,6 +25,7 @@ type mode uint8
 const (
 	modeList mode = iota
 	modeView
+	modeBlobCopy
 	modeForm
 	modeDelete
 	modeConflict
@@ -151,11 +152,22 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeView:
 		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || key.Type == tea.KeyF3 {
 			m.mode = modeList
+			m.resizeWidgets()
+			return m, nil
+		}
+		if strings.EqualFold(key.String(), "b") {
+			m.mode = modeBlobCopy
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(key)
 		return m, cmd
+	case modeBlobCopy:
+		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || strings.EqualFold(key.String(), "b") {
+			m.mode = modeView
+			m.resizeWidgets()
+		}
+		return m, nil
 	}
 	if m.query.Focused() {
 		switch key.Type {
@@ -182,6 +194,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyF3, tea.KeyEnter:
 		if len(m.visible) > 0 {
 			m.mode = modeView
+			m.resizeWidgets()
 		}
 	case tea.KeyF4:
 		if len(m.visible) > 0 {
@@ -583,7 +596,12 @@ func (m *Model) resizeWidgets() {
 	left := max(18, m.width/3)
 	right := max(18, m.width-left-5)
 	m.query.Width = max(8, m.width-10)
-	m.detail.Width, m.detail.Height = right-4, max(3, m.height-9)
+	if m.mode == modeView || m.mode == modeBlobCopy {
+		outerWidth := min(80, m.width)
+		m.detail.Width, m.detail.Height = max(8, outerWidth-6), max(3, m.height-9)
+	} else {
+		m.detail.Width, m.detail.Height = right-4, max(3, m.height-9)
+	}
 	m.ensureSelectedVisible()
 	if m.mode == modeForm {
 		m.form.name.Width, m.form.tags.Width = max(10, m.width-12), max(10, m.width-12)
@@ -650,7 +668,9 @@ func (m Model) View() string {
 	case modeQuitConfirm:
 		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\nQ/Y Quit • Enter/Esc/C Continue editing"))
 	case modeView:
-		return m.fitView(header + "\n" + m.renderModal("View entry\n\n"+m.detail.View()+"\n\n↑↓ Scroll • Esc/Enter Close"))
+		return m.fitView(header + "\n" + m.renderModal("View entry\n\n"+m.detail.View()+"\n\n↑↓ Scroll • B Copy blob • Esc/Enter Close"))
+	case modeBlobCopy:
+		return safeMultiline(m.selectedEntry().Blob)
 	}
 	narrow := m.width < 60
 	listWidth := max(16, m.width/3)
@@ -687,7 +707,7 @@ func (m Model) fitView(content string) string {
 }
 
 func (m Model) renderModal(content string) string {
-	return modalStyle.Width(max(18, min(60, m.width-2))).Render(content)
+	return modalStyle.Width(max(18, min(78, m.width-2))).Render(content)
 }
 
 func (m Model) selectedEntry() vault.Entry {
