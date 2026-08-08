@@ -8,7 +8,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 ## Features
 
 - Single, Git-friendly YAML vault
-- Split list/detail view with full record details
+- Split list/detail view with light parameter labels and a cyan selected-name value
 - Create, view, edit, and delete entries
 - Stable random UUIDv4 identifiers
 - Case-insensitive canonical tags with an A-Z/Z-A tag-picker view

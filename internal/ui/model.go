@@ -405,6 +405,7 @@ func (m *Model) updateTags(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 			input := textinput.New()
 			input.KeyMap.Paste.SetEnabled(false)
 			input.Prompt = "New tag: "
+			input.PromptStyle = parameterStyle
 			input.Focus()
 			m.newTag = input
 			m.mode, m.status = modeNewTag, ""
@@ -468,6 +469,7 @@ func (m *Model) openForm(entry vault.Entry) {
 	name.KeyMap.Paste.SetEnabled(false)
 	tags.KeyMap.Paste.SetEnabled(false)
 	name.Prompt, tags.Prompt = "Name: ", "Tags: "
+	name.PromptStyle, tags.PromptStyle = parameterStyle, parameterStyle
 	name.SetValue(entry.Name)
 	tags.SetValue(strings.Join(entry.Tags, ", "))
 	desc, blob := textarea.New(), textarea.New()
@@ -706,7 +708,7 @@ func (m Model) View() string {
 		if m.width < 60 || m.height < 18 {
 			labels := []string{"Name", "Tags", "Description", "Blob (stored unchanged)"}
 			widgets := []string{m.form.name.View(), m.form.tags.View(), m.form.description.View(), m.form.blob.View()}
-			lines := []string{header, formTitle, labels[m.form.focus] + ":", widgets[m.form.focus]}
+			lines := []string{header, formTitle, parameterStyle.Render(labels[m.form.focus] + ":"), widgets[m.form.focus]}
 			if status != "" {
 				lines = append(lines, status)
 			}
@@ -717,7 +719,7 @@ func (m Model) View() string {
 			return m.fitView(strings.Join(lines, "\n"))
 		}
 		formActions := renderActionBar(m.width, "Tab/Shift+Tab Next", "Ctrl+T Select tags", "Ctrl+S Save", "Esc Cancel")
-		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), "Description:", m.form.description.View(), "Blob (stored unchanged):", m.form.blob.View(), status, formActions}, "\n"))
+		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), parameterStyle.Render("Description:"), m.form.description.View(), parameterStyle.Render("Blob (stored unchanged):"), m.form.blob.View(), status, formActions}, "\n"))
 	case modeDelete:
 		deleteActions := renderActionBar(modalActionWidth, "Y Delete", "N Cancel", "Esc Cancel")
 		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\n%s\n%s", safeInline(m.selectedEntry().Name), deleteActions, status)))
@@ -827,7 +829,19 @@ func (m Model) selectedEntry() vault.Entry {
 func (m Model) selectedID() string { return m.selectedEntry().ID }
 
 func entryDetails(e vault.Entry) string {
-	return fmt.Sprintf("%s\nID: %s\nTags: %s\nCreated: %s\nUpdated: %s\n\nDescription:\n%s\n\nBlob:\n%s", detailNameStyle.Render("Name: "+safeInline(e.Name)), safeInline(e.ID), safeInline(strings.Join(e.Tags, ", ")), safeInline(e.Created), safeInline(e.Updated), safeMultiline(e.Description), safeMultiline(e.Blob))
+	return strings.Join([]string{
+		parameterStyle.Render("Name:") + " " + detailNameStyle.Render(safeInline(e.Name)),
+		parameterStyle.Render("ID:") + " " + safeInline(e.ID),
+		parameterStyle.Render("Tags:") + " " + safeInline(strings.Join(e.Tags, ", ")),
+		parameterStyle.Render("Created:") + " " + safeInline(e.Created),
+		parameterStyle.Render("Updated:") + " " + safeInline(e.Updated),
+		"",
+		parameterStyle.Render("Description:"),
+		safeMultiline(e.Description),
+		"",
+		parameterStyle.Render("Blob:"),
+		safeMultiline(e.Blob),
+	}, "\n")
 }
 
 func safeInline(value string) string { return escapeControls(value, false) }

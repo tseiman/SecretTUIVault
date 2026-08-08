@@ -4,6 +4,7 @@ import "github.com/charmbracelet/lipgloss"
 
 var (
 	titleStyle      = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	parameterStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("#F2F2F2"))
 	detailNameStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("81"))
 	actionStyle     = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("#000000")).Background(lipgloss.Color("#5FD7FF"))
 	selectedStyle   = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("212"))

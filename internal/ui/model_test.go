@@ -120,6 +120,41 @@ func TestEntriesHeadingShowsVisibleCount(t *testing.T) {
 	}
 }
 
+func TestParameterLabelsUseLightWhiteAndKeepNameValueCyan(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	if got := parameterStyle.GetForeground(); got != lipgloss.Color("#F2F2F2") {
+		t.Fatalf("parameter foreground=%v, want light white", got)
+	}
+
+	doc := uiDocument(t)
+	details := entryDetails(doc.Entries[0])
+	if !strings.Contains(details, parameterStyle.Render("Name:")) || !strings.Contains(details, detailNameStyle.Render("Alpha")) {
+		t.Fatalf("detail name label/value styles missing: %q", details)
+	}
+	if strings.Contains(details, detailNameStyle.Render("Name: Alpha")) {
+		t.Fatalf("Name label incorrectly uses cyan value style: %q", details)
+	}
+	for _, label := range []string{"ID:", "Tags:", "Created:", "Updated:", "Description:", "Blob:"} {
+		if !strings.Contains(details, parameterStyle.Render(label)) {
+			t.Fatalf("detail parameter %q missing light style: %q", label, details)
+		}
+	}
+
+	form, _ := update(New(doc, &fakeSaver{}), tea.KeyMsg{Type: tea.KeyF5})
+	if got := form.form.name.PromptStyle.GetForeground(); got != parameterStyle.GetForeground() {
+		t.Fatalf("form Name prompt foreground=%v", got)
+	}
+	if got := form.form.tags.PromptStyle.GetForeground(); got != parameterStyle.GetForeground() {
+		t.Fatalf("form Tags prompt foreground=%v", got)
+	}
+	for _, label := range []string{"Description:", "Blob (stored unchanged):"} {
+		if !strings.Contains(form.View(), parameterStyle.Render(label)) {
+			t.Fatalf("form parameter %q missing light style: %q", label, form.View())
+		}
+	}
+}
+
 func TestDetailNameStyleHasForegroundColor(t *testing.T) {
 	if _, uncolored := detailNameStyle.GetForeground().(lipgloss.NoColor); uncolored {
 		t.Fatal("detail name has no foreground color")
