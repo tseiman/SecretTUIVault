@@ -30,3 +30,13 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Local build output and Hermes plans
+/secretvault
+/dist/
+/.hermes/
+
+# Local vault data and backups
+/.secrets/
+/vault.yaml
+/vault.yaml.bak

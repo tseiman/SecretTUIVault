@@ -1,0 +1,711 @@
+package ui
+
+import (
+	"errors"
+	"fmt"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/charmbracelet/bubbles/textarea"
+	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/viewport"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
+	"github.com/tseiman/SecretTUIVault/internal/search"
+	"github.com/tseiman/SecretTUIVault/internal/vault"
+)
+
+type saver interface {
+	Save(vault.Document, bool) error
+}
+type mode uint8
+
+const (
+	modeList mode = iota
+	modeView
+	modeForm
+	modeDelete
+	modeConflict
+	modeTags
+	modeNewTag
+	modeQuitConfirm
+)
+
+type formModel struct {
+	name            textinput.Model
+	tags            textinput.Model
+	description     textarea.Model
+	blob            textarea.Model
+	blobOriginal    string
+	blobInitial     string
+	blobDirty       bool
+	blobPasted      string
+	blobPasteActive bool
+	focus           int
+	editID          string
+}
+
+type Model struct {
+	doc         vault.Document
+	store       saver
+	visible     []vault.Entry
+	selected    int
+	listOffset  int
+	ascending   bool
+	query       textinput.Model
+	detail      viewport.Model
+	form        formModel
+	tagOptions  []string
+	tagSelected map[string]bool
+	tagCursor   int
+	tagOffset   int
+	newTag      textinput.Model
+	mode        mode
+	returnMode  mode
+	pending     *vault.Document
+	status      string
+	width       int
+	height      int
+	now         func() time.Time
+}
+
+func New(doc vault.Document, store saver) Model {
+	q := textinput.New()
+	q.KeyMap.Paste.SetEnabled(false)
+	q.Prompt = "Search: "
+	q.Placeholder = `text, TAG:value, NAME:"words", AND`
+	d := viewport.New(40, 10)
+	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, now: time.Now}
+	m.refresh("")
+	return m
+}
+
+func (m Model) Init() tea.Cmd { return nil }
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if size, ok := msg.(tea.WindowSizeMsg); ok {
+		m.width, m.height = max(20, size.Width), max(8, size.Height)
+		m.resizeWidgets()
+		return m, nil
+	}
+	key, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	if key.Type == tea.KeyF10 {
+		if m.mode == modeForm || m.mode == modeConflict || m.mode == modeTags || m.mode == modeNewTag {
+			m.returnMode, m.mode = m.mode, modeQuitConfirm
+			return m, nil
+		}
+		return m, tea.Quit
+	}
+	switch m.mode {
+	case modeForm:
+		return m.updateForm(key)
+	case modeDelete:
+		if key.Type == tea.KeyEsc {
+			m.mode, m.status = modeList, "Deletion cancelled"
+		} else if key.Type == tea.KeyEnter || strings.EqualFold(key.String(), "y") {
+			m.deleteSelected()
+		}
+		return m, nil
+	case modeConflict:
+		if key.Type == tea.KeyEnter || key.Type == tea.KeyEsc || strings.EqualFold(key.String(), "c") {
+			m.mode, m.pending, m.status = modeList, nil, "Save cancelled; external changes preserved"
+		} else if strings.EqualFold(key.String(), "o") {
+			m.forcePending()
+		}
+		return m, nil
+	case modeTags:
+		return m.updateTags(key)
+	case modeNewTag:
+		return m.updateNewTag(key)
+	case modeQuitConfirm:
+		if strings.EqualFold(key.String(), "q") || strings.EqualFold(key.String(), "y") {
+			return m, tea.Quit
+		}
+		if key.Type == tea.KeyEnter || key.Type == tea.KeyEsc || strings.EqualFold(key.String(), "c") {
+			m.mode = m.returnMode
+		}
+		return m, nil
+	case modeView:
+		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || key.Type == tea.KeyF3 {
+			m.mode = modeList
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.detail, cmd = m.detail.Update(key)
+		return m, cmd
+	}
+	if m.query.Focused() {
+		switch key.Type {
+		case tea.KeyEsc, tea.KeyEnter:
+			m.query.Blur()
+			return m, nil
+		case tea.KeyUp:
+			m.move(-1)
+			return m, nil
+		case tea.KeyDown:
+			m.move(1)
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.query, cmd = m.query.Update(key)
+		m.refresh(m.selectedID())
+		return m, cmd
+	}
+	switch key.Type {
+	case tea.KeyUp:
+		m.move(-1)
+	case tea.KeyDown:
+		m.move(1)
+	case tea.KeyF3, tea.KeyEnter:
+		if len(m.visible) > 0 {
+			m.mode = modeView
+		}
+	case tea.KeyF4:
+		if len(m.visible) > 0 {
+			m.openForm(m.selectedEntry())
+		}
+	case tea.KeyF5:
+		m.openForm(vault.Entry{})
+	case tea.KeyF8:
+		if len(m.visible) > 0 {
+			m.mode = modeDelete
+		}
+	case tea.KeyRunes:
+		switch key.String() {
+		case "/":
+			m.query.Focus()
+		case "s", "S":
+			id := m.selectedID()
+			m.ascending = !m.ascending
+			m.refresh(id)
+		}
+	}
+	return m, nil
+}
+
+func (m *Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Type == tea.KeyEsc {
+		m.mode, m.status = modeList, "Edit cancelled"
+		return *m, nil
+	}
+	if key.Type == tea.KeyCtrlS {
+		m.saveForm()
+		return *m, nil
+	}
+	if key.Type == tea.KeyCtrlT {
+		m.openTagPicker()
+		return *m, nil
+	}
+	if key.Type == tea.KeyTab || key.Type == tea.KeyShiftTab {
+		delta := 1
+		if key.Type == tea.KeyShiftTab {
+			delta = -1
+		}
+		m.form.focus = (m.form.focus + delta + 4) % 4
+		m.focusForm()
+		return *m, nil
+	}
+	var cmd tea.Cmd
+	switch m.form.focus {
+	case 0:
+		m.form.name, cmd = m.form.name.Update(key)
+	case 1:
+		m.form.tags, cmd = m.form.tags.Update(key)
+	case 2:
+		m.form.description, cmd = m.form.description.Update(key)
+	case 3:
+		if key.Paste {
+			m.form.blobPasted = string(key.Runes)
+			m.form.blobPasteActive = true
+			m.form.blobDirty = true
+			m.form.blob.SetValue(m.form.blobPasted)
+			return *m, nil
+		}
+		before := m.form.blob.Value()
+		m.form.blob, cmd = m.form.blob.Update(key)
+		if m.form.blob.Value() != before {
+			m.form.blobDirty = true
+			m.form.blobPasteActive = false
+		}
+	}
+	return *m, cmd
+}
+
+func (m *Model) openTagPicker() {
+	m.tagOptions = append([]string(nil), m.doc.CanonicalTags()...)
+	current := vault.CanonicalizeTags(splitTags(m.form.tags.Value()), m.tagOptions)
+	m.tagSelected = make(map[string]bool, len(current))
+	for _, tag := range current {
+		key := strings.ToLower(tag)
+		m.tagSelected[key] = true
+		found := false
+		for _, option := range m.tagOptions {
+			if strings.EqualFold(option, tag) {
+				found = true
+				break
+			}
+		}
+		if !found {
+			m.tagOptions = append(m.tagOptions, tag)
+		}
+	}
+	m.tagCursor, m.tagOffset = 0, 0
+	m.mode, m.status = modeTags, ""
+}
+
+func (m *Model) updateTags(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch key.Type {
+	case tea.KeyEsc:
+		m.mode = modeForm
+		m.focusForm()
+	case tea.KeyUp:
+		if len(m.tagOptions) > 0 {
+			m.tagCursor = (m.tagCursor - 1 + len(m.tagOptions)) % len(m.tagOptions)
+			m.ensureTagVisible()
+		}
+	case tea.KeyDown:
+		if len(m.tagOptions) > 0 {
+			m.tagCursor = (m.tagCursor + 1) % len(m.tagOptions)
+			m.ensureTagVisible()
+		}
+	case tea.KeySpace:
+		if len(m.tagOptions) > 0 {
+			key := strings.ToLower(m.tagOptions[m.tagCursor])
+			m.tagSelected[key] = !m.tagSelected[key]
+		}
+	case tea.KeyEnter:
+		selected := make([]string, 0, len(m.tagOptions))
+		for _, tag := range m.tagOptions {
+			if m.tagSelected[strings.ToLower(tag)] {
+				selected = append(selected, tag)
+			}
+		}
+		m.form.tags.SetValue(strings.Join(selected, ", "))
+		m.form.focus = 1
+		m.mode = modeForm
+		m.focusForm()
+	case tea.KeyRunes:
+		if strings.EqualFold(key.String(), "n") {
+			input := textinput.New()
+			input.KeyMap.Paste.SetEnabled(false)
+			input.Prompt = "New tag: "
+			input.Focus()
+			m.newTag = input
+			m.mode, m.status = modeNewTag, ""
+		}
+	}
+	return *m, nil
+}
+
+func (m Model) tagPageSize() int { return max(1, m.height-10) }
+
+func (m *Model) ensureTagVisible() {
+	page := m.tagPageSize()
+	if m.tagCursor < m.tagOffset {
+		m.tagOffset = m.tagCursor
+	}
+	if m.tagCursor >= m.tagOffset+page {
+		m.tagOffset = m.tagCursor - page + 1
+	}
+	if maxOffset := max(0, len(m.tagOptions)-page); m.tagOffset > maxOffset {
+		m.tagOffset = maxOffset
+	}
+}
+
+func (m *Model) updateNewTag(key tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if key.Type == tea.KeyEsc {
+		m.mode = modeTags
+		return *m, nil
+	}
+	if key.Type == tea.KeyEnter {
+		value := strings.TrimSpace(m.newTag.Value())
+		if value == "" {
+			m.status = "Tag must not be empty"
+			return *m, nil
+		}
+		canonical := vault.CanonicalizeTags([]string{value}, m.tagOptions)[0]
+		found := -1
+		for i, option := range m.tagOptions {
+			if strings.EqualFold(option, canonical) {
+				found = i
+				break
+			}
+		}
+		if found < 0 {
+			m.tagOptions = append(m.tagOptions, canonical)
+			found = len(m.tagOptions) - 1
+		}
+		m.tagSelected[strings.ToLower(m.tagOptions[found])] = true
+		m.tagCursor = found
+		m.ensureTagVisible()
+		m.mode, m.status = modeTags, ""
+		return *m, nil
+	}
+	var cmd tea.Cmd
+	m.newTag, cmd = m.newTag.Update(key)
+	return *m, cmd
+}
+
+func (m *Model) openForm(entry vault.Entry) {
+	name, tags := textinput.New(), textinput.New()
+	name.KeyMap.Paste.SetEnabled(false)
+	tags.KeyMap.Paste.SetEnabled(false)
+	name.Prompt, tags.Prompt = "Name: ", "Tags: "
+	name.SetValue(entry.Name)
+	tags.SetValue(strings.Join(entry.Tags, ", "))
+	desc, blob := textarea.New(), textarea.New()
+	desc.KeyMap.Paste.SetEnabled(false)
+	blob.KeyMap.Paste.SetEnabled(false)
+	desc.Placeholder, blob.Placeholder = "Description (metadata only)", "Opaque text blob"
+	desc.SetValue(entry.Description)
+	blob.SetValue(entry.Blob)
+	m.form = formModel{
+		name: name, tags: tags, description: desc, blob: blob,
+		blobOriginal: entry.Blob, blobInitial: blob.Value(), editID: entry.ID,
+	}
+	m.mode, m.status = modeForm, ""
+	m.focusForm()
+	m.resizeWidgets()
+}
+
+func (m *Model) focusForm() {
+	m.form.name.Blur()
+	m.form.tags.Blur()
+	m.form.description.Blur()
+	m.form.blob.Blur()
+	switch m.form.focus {
+	case 0:
+		m.form.name.Focus()
+	case 1:
+		m.form.tags.Focus()
+	case 2:
+		m.form.description.Focus()
+	case 3:
+		m.form.blob.Focus()
+	}
+}
+
+func (m *Model) saveForm() {
+	name := m.form.name.Value()
+	if strings.TrimSpace(name) == "" {
+		m.status = "Name must not be empty"
+		return
+	}
+	tags := splitTags(m.form.tags.Value())
+	blob := m.form.blobOriginal
+	if m.form.blobPasteActive {
+		blob = m.form.blobPasted
+	} else if m.form.editID == "" || m.form.blobDirty || m.form.blob.Value() != m.form.blobInitial {
+		blob = m.form.blob.Value()
+	}
+	candidate := cloneDocument(m.doc)
+	if m.form.editID == "" {
+		entry, err := vault.NewEntry(name, m.form.description.Value(), tags, blob, m.doc.CanonicalTags(), m.now())
+		if err != nil {
+			m.status = err.Error()
+			return
+		}
+		candidate.Entries = append(candidate.Entries, entry)
+	} else {
+		for i := range candidate.Entries {
+			if candidate.Entries[i].ID == m.form.editID {
+				candidate.Entries[i].Apply(name, m.form.description.Value(), tags, blob, m.doc.CanonicalTags(), m.now())
+			}
+		}
+	}
+	m.saveCandidate(candidate, "Saved")
+}
+
+func (m *Model) deleteSelected() {
+	id := m.selectedID()
+	candidate := cloneDocument(m.doc)
+	candidate.Entries = candidate.Entries[:0]
+	for _, entry := range m.doc.Entries {
+		if entry.ID != id {
+			candidate.Entries = append(candidate.Entries, entry)
+		}
+	}
+	m.saveCandidate(candidate, "Entry deleted")
+}
+
+func (m *Model) saveCandidate(candidate vault.Document, message string) {
+	if err := m.store.Save(candidate, false); err != nil {
+		var committed *vault.CommittedError
+		if errors.As(err, &committed) {
+			m.commit(candidate, "Saved with warning: "+err.Error())
+			return
+		}
+		if errors.Is(err, vault.ErrConflict) {
+			m.pending = &candidate
+			m.mode, m.status = modeConflict, "Vault changed on disk"
+			return
+		}
+		m.status = err.Error()
+		return
+	}
+	m.commit(candidate, message)
+}
+
+func (m *Model) forcePending() {
+	if m.pending == nil {
+		m.mode = modeList
+		return
+	}
+	candidate := *m.pending
+	if err := m.store.Save(candidate, true); err != nil {
+		var committed *vault.CommittedError
+		if errors.As(err, &committed) {
+			m.commit(candidate, "Overwritten with warning: "+err.Error())
+			return
+		}
+		m.status = err.Error()
+		return
+	}
+	m.commit(candidate, "External changes overwritten")
+}
+
+func (m *Model) commit(candidate vault.Document, message string) {
+	id := m.selectedID()
+	if len(candidate.Entries) > len(m.doc.Entries) {
+		id = candidate.Entries[len(candidate.Entries)-1].ID
+	}
+	m.doc, m.pending, m.mode, m.status = candidate, nil, modeList, message
+	m.refresh(id)
+}
+
+func (m *Model) refresh(selectedID string) {
+	q, err := search.Parse(m.query.Value())
+	if err != nil {
+		m.status = "Query: " + err.Error()
+		return
+	}
+	if strings.HasPrefix(m.status, "Query: ") {
+		m.status = ""
+	}
+	results := q.Filter(m.doc.Entries)
+	m.visible = make([]vault.Entry, len(results))
+	for i := range results {
+		m.visible[i] = results[i].Entry
+	}
+	sort.SliceStable(m.visible, func(i, j int) bool {
+		a, b := strings.ToLower(m.visible[i].Name), strings.ToLower(m.visible[j].Name)
+		if m.ascending {
+			return a < b || (a == b && m.visible[i].ID < m.visible[j].ID)
+		}
+		return a > b || (a == b && m.visible[i].ID > m.visible[j].ID)
+	})
+	m.selected = 0
+	for i := range m.visible {
+		if m.visible[i].ID == selectedID {
+			m.selected = i
+			break
+		}
+	}
+	m.ensureSelectedVisible()
+	m.updateDetail()
+}
+
+func (m *Model) move(delta int) {
+	if len(m.visible) == 0 {
+		return
+	}
+	m.selected = (m.selected + delta + len(m.visible)) % len(m.visible)
+	m.ensureSelectedVisible()
+	m.updateDetail()
+}
+
+func (m *Model) listPageSize() int { return max(1, m.height-11) }
+
+func (m *Model) ensureSelectedVisible() {
+	if len(m.visible) == 0 {
+		m.listOffset = 0
+		return
+	}
+	page := m.listPageSize()
+	if m.selected < m.listOffset {
+		m.listOffset = m.selected
+	}
+	if m.selected >= m.listOffset+page {
+		m.listOffset = m.selected - page + 1
+	}
+	if maxOffset := max(0, len(m.visible)-page); m.listOffset > maxOffset {
+		m.listOffset = maxOffset
+	}
+}
+
+func (m *Model) updateDetail() {
+	if len(m.visible) == 0 {
+		m.detail.SetContent("No matching entries")
+		return
+	}
+	m.detail.SetContent(entryDetails(m.selectedEntry()))
+}
+
+func (m *Model) resizeWidgets() {
+	left := max(18, m.width/3)
+	right := max(18, m.width-left-5)
+	m.query.Width = max(8, m.width-10)
+	m.detail.Width, m.detail.Height = right-4, max(3, m.height-9)
+	m.ensureSelectedVisible()
+	if m.mode == modeForm {
+		m.form.name.Width, m.form.tags.Width = max(10, m.width-12), max(10, m.width-12)
+		m.form.description.SetWidth(max(10, m.width-8))
+		m.form.blob.SetWidth(max(10, m.width-8))
+		m.form.description.SetHeight(max(2, (m.height-12)/3))
+		m.form.blob.SetHeight(max(3, (m.height-12)/2))
+	}
+}
+
+func (m Model) View() string {
+	header := ansi.Truncate(titleStyle.Render("SecretTUIVault")+"  "+mutedStyle.Render(sortLabel(m.ascending)), max(1, m.width), "…")
+	footerText := "↑↓ Navigate  / Search  S Sort  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
+	if m.width < 70 {
+		footerText = "↑↓ Nav  / Search  F3 View  F4 Edit  F5 New  F10 Quit"
+	}
+	footer := mutedStyle.Render(ansi.Truncate(footerText, max(1, m.width), "…"))
+	status := safeInline(m.status)
+	if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "must") || strings.Contains(strings.ToLower(status), "disk") {
+		status = errorStyle.Render(status)
+	}
+	switch m.mode {
+	case modeForm:
+		formTitle := "Edit entry"
+		if m.form.editID == "" {
+			formTitle = "New entry"
+		}
+		if m.width < 60 || m.height < 18 {
+			labels := []string{"Name", "Tags", "Description", "Blob (stored unchanged)"}
+			widgets := []string{m.form.name.View(), m.form.tags.View(), m.form.description.View(), m.form.blob.View()}
+			lines := []string{header, formTitle, labels[m.form.focus] + ":", widgets[m.form.focus]}
+			if status != "" {
+				lines = append(lines, status)
+			}
+			lines = append(lines, ansi.Truncate("Tab Next • Ctrl+S Save", max(1, m.width), "…"), ansi.Truncate("Esc Cancel • F10 Quit", max(1, m.width), "…"))
+			return m.fitView(strings.Join(lines, "\n"))
+		}
+		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), "Description:", m.form.description.View(), "Blob (stored unchanged):", m.form.blob.View(), status, "Tab/Shift+Tab Next • Ctrl+T Select tags • Ctrl+S Save • Esc Cancel"}, "\n"))
+	case modeDelete:
+		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\nEnter/Y Delete • Esc Cancel\n%s", safeInline(m.selectedEntry().Name), status)))
+	case modeConflict:
+		return m.fitView(header + "\n" + m.renderModal("The vault changed after it was loaded.\nO Overwrite • Enter/Esc/C Cancel\n"+status))
+	case modeTags:
+		pageEnd := min(len(m.tagOptions), m.tagOffset+m.tagPageSize())
+		rows := make([]string, 0, pageEnd-m.tagOffset)
+		for i := m.tagOffset; i < pageEnd; i++ {
+			tag := m.tagOptions[i]
+			mark := " "
+			if m.tagSelected[strings.ToLower(tag)] {
+				mark = "x"
+			}
+			prefix := "  "
+			if i == m.tagCursor {
+				prefix = "› "
+			}
+			rows = append(rows, fmt.Sprintf("%s[%s] %s", prefix, mark, safeInline(tag)))
+		}
+		if len(rows) == 0 {
+			rows = append(rows, "No existing tags")
+		}
+		return m.fitView(header + "\n" + m.renderModal("Select tags\n\n"+strings.Join(rows, "\n")+"\n\n↑↓ Move • Space Toggle • N New • Enter Apply • Esc Cancel"))
+	case modeNewTag:
+		return m.fitView(header + "\n" + m.renderModal("Create tag\n"+m.newTag.View()+"\nEnter Add • Esc Back\n"+status))
+	case modeQuitConfirm:
+		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\nQ/Y Quit • Enter/Esc/C Continue editing"))
+	case modeView:
+		return m.fitView(header + "\n" + m.renderModal("View entry\n\n"+m.detail.View()+"\n\n↑↓ Scroll • Esc/Enter Close"))
+	}
+	narrow := m.width < 60
+	listWidth := max(16, m.width/3)
+	detailWidth := max(16, m.width-listWidth-1)
+	if narrow {
+		listWidth = max(12, m.width)
+	}
+	var rows []string
+	if len(m.visible) == 0 {
+		rows = []string{"No matching entries"}
+	} else {
+		end := min(len(m.visible), m.listOffset+m.listPageSize())
+		for i := m.listOffset; i < end; i++ {
+			entry := m.visible[i]
+			prefix := "  "
+			line := ansi.Truncate(fmt.Sprintf("%s%s [%s]", prefix, safeInline(entry.Name), safeInline(strings.Join(entry.Tags, ", "))), max(6, listWidth-4), "…")
+			if i == m.selected {
+				line = selectedStyle.Render(ansi.Truncate("› "+safeInline(entry.Name)+" ["+safeInline(strings.Join(entry.Tags, ", "))+"]", max(6, listWidth-4), "…"))
+			}
+			rows = append(rows, line)
+		}
+	}
+	left := borderStyle.Width(max(8, listWidth-2)).Height(max(3, m.height-9)).Render("Entries\n" + strings.Join(rows, "\n"))
+	right := borderStyle.Width(max(8, detailWidth-2)).Height(max(3, m.height-9)).Render("Details\n" + m.detail.View())
+	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
+	if narrow {
+		body = left
+	}
+	return m.fitView(strings.Join([]string{header, m.query.View(), body, status, footer}, "\n"))
+}
+
+func (m Model) fitView(content string) string {
+	return lipgloss.NewStyle().MaxWidth(m.width).MaxHeight(m.height).Render(content)
+}
+
+func (m Model) renderModal(content string) string {
+	return modalStyle.Width(max(18, min(60, m.width-2))).Render(content)
+}
+
+func (m Model) selectedEntry() vault.Entry {
+	if len(m.visible) == 0 {
+		return vault.Entry{}
+	}
+	return m.visible[min(max(0, m.selected), len(m.visible)-1)]
+}
+func (m Model) selectedID() string { return m.selectedEntry().ID }
+
+func entryDetails(e vault.Entry) string {
+	return fmt.Sprintf("Name: %s\nID: %s\nTags: %s\nCreated: %s\nUpdated: %s\n\nDescription:\n%s\n\nBlob:\n%s", safeInline(e.Name), safeInline(e.ID), safeInline(strings.Join(e.Tags, ", ")), safeInline(e.Created), safeInline(e.Updated), safeMultiline(e.Description), safeMultiline(e.Blob))
+}
+
+func safeInline(value string) string { return escapeControls(value, false) }
+
+func safeMultiline(value string) string { return escapeControls(value, true) }
+
+func escapeControls(value string, preserveNewlines bool) string {
+	var escaped strings.Builder
+	for _, r := range value {
+		if r == '\n' && preserveNewlines {
+			escaped.WriteRune(r)
+			continue
+		}
+		if r < 0x20 || (r >= 0x7f && r <= 0x9f) {
+			if r <= 0xff {
+				fmt.Fprintf(&escaped, "\\x%02x", r)
+			} else {
+				fmt.Fprintf(&escaped, "\\u%04x", r)
+			}
+			continue
+		}
+		escaped.WriteRune(r)
+	}
+	return escaped.String()
+}
+func splitTags(s string) []string {
+	return strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == '\n' })
+}
+func cloneDocument(d vault.Document) vault.Document {
+	c := d
+	c.Entries = append([]vault.Entry(nil), d.Entries...)
+	for i := range c.Entries {
+		c.Entries[i].Tags = append([]string(nil), c.Entries[i].Tags...)
+	}
+	return c
+}
+func sortLabel(ascending bool) string {
+	if ascending {
+		return "Name ↑"
+	}
+	return "Name ↓"
+}
