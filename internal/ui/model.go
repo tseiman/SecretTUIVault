@@ -650,11 +650,12 @@ func (m Model) View() string {
 	header := m.renderHeader()
 	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
 	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
-	footerText := "↑↓ Navigate  / Search  S Sort  B Copy  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
-	if m.width < 70 {
-		footerText = "↑↓ Nav  / Search  B Copy  F3 View  F4 Edit  F5 New  F10 Quit"
+	actions := []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"}
+	blocks := make([]string, len(actions))
+	for i, action := range actions {
+		blocks[i] = actionStyle.Render(action)
 	}
-	footer := mutedStyle.Render(ansi.Truncate(footerText, max(1, m.width), "…"))
+	footer := ansi.Truncate(strings.Join(blocks, " "), max(1, m.width), "…")
 	status := safeInline(m.status)
 	if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "must") || strings.Contains(strings.ToLower(status), "disk") {
 		status = errorStyle.Render(status)

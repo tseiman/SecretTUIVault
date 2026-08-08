@@ -110,7 +110,7 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `Ctrl+S`: save a form
 - `Esc`: close or cancel the current view/dialog
 
-The footer always shows the primary actions. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
+The footer renders each primary action as an individual black-on-cyan block. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
 
 On Linux/Unix, a missing or unusable `wl-copy`, `xclip`, or `xsel` command is reported after returning from the automatic borderless fallback view. Install the clipboard utility appropriate for the active desktop session and ensure its display environment (`WAYLAND_DISPLAY` or `DISPLAY`) is available.
 

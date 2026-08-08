@@ -56,6 +56,23 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 	}
 }
 
+func TestFooterActionsUseInverseCyanBlocks(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	view := m.View()
+	for _, action := range []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"} {
+		if !strings.Contains(view, action) {
+			t.Fatalf("footer action %q missing: %q", action, view)
+		}
+	}
+	if _, uncolored := actionStyle.GetForeground().(lipgloss.NoColor); uncolored {
+		t.Fatal("footer action foreground has no color")
+	}
+	if _, uncolored := actionStyle.GetBackground().(lipgloss.NoColor); uncolored {
+		t.Fatal("footer action background has no color")
+	}
+}
+
 func TestEntriesHeadingShowsVisibleCount(t *testing.T) {
 	m := New(uiDocument(t), &fakeSaver{})
 	if got := m.View(); !strings.Contains(got, "Entries (2)") {
