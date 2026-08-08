@@ -93,6 +93,8 @@ secretvault --version
 
 The parent directory and vault file are created on the first save. On Unix-like systems, directories created by SecretTUIVault use mode `0700`; existing caller-owned parent directories are never chmodded. Vault and backup files use mode `0600`. Symbolic links in any vault path component are rejected.
 
+The bottom status line shows the YAML path, current on-disk size, and status message, for example `~/.secrets/vault.yaml (32kB)  Saved`. Paths below the current home directory use `~`; sizes automatically use `B`, `kB`, or `MB`.
+
 ## Keyboard controls
 
 - `↑` / `↓`: select an entry

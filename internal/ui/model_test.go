@@ -3,6 +3,8 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -19,6 +21,16 @@ type fakeSaver struct {
 	forces []bool
 	err    error
 }
+
+type metadataSaver struct {
+	fakeSaver
+	path    string
+	size    int64
+	sizeErr error
+}
+
+func (s *metadataSaver) Path() string         { return s.path }
+func (s *metadataSaver) Size() (int64, error) { return s.size, s.sizeErr }
 
 func (f *fakeSaver) Save(d vault.Document, force bool) error {
 	f.saved = append(f.saved, d)
@@ -117,6 +129,31 @@ func TestEntriesHeadingShowsVisibleCount(t *testing.T) {
 	m.visible = m.visible[:1]
 	if got := m.View(); !strings.Contains(got, "Entries (1)") {
 		t.Fatalf("visible entry count was not updated: %q", got)
+	}
+}
+
+func TestStatusLineShowsShortVaultPathHumanSizeAndStatus(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &metadataSaver{path: filepath.Join(home, ".secrets", "vault.yaml"), size: 32_000}
+	m := New(uiDocument(t), store)
+	m.status = "Saved"
+	want := filepath.Join("~", ".secrets", "vault.yaml") + " (32kB)  Saved"
+	if got := m.View(); !strings.Contains(got, want) {
+		t.Fatalf("status line missing shortened path, size, or status: %q", got)
+	}
+}
+
+func TestHumanFileSizeUsesUsefulUnit(t *testing.T) {
+	for _, tc := range []struct {
+		size int64
+		want string
+	}{{0, "0B"}, {999, "999B"}, {1_000, "1kB"}, {1_536, "1.5kB"}, {32_000, "32kB"}, {1_000_000, "1MB"}, {1_500_000, "1.5MB"}} {
+		if got := humanFileSize(tc.size); got != tc.want {
+			t.Fatalf("humanFileSize(%d)=%q, want %q", tc.size, got, tc.want)
+		}
 	}
 }
 

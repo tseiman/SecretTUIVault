@@ -55,6 +55,27 @@ func TestStoreCreatesSecureVaultAndRoundTripsBlob(t *testing.T) {
 	}
 }
 
+func TestStoreReportsCurrentFileSize(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "vault.yaml")
+	store := NewStore(path)
+	if size, err := store.Size(); err != nil || size != 0 {
+		t.Fatalf("missing vault size=%d err=%v", size, err)
+	}
+	if _, err := store.Load(); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Save(sampleDocument(t, "opaque placeholder"), false); err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size, err := store.Size(); err != nil || size != info.Size() {
+		t.Fatalf("vault size=%d err=%v, want %d", size, err, info.Size())
+	}
+}
+
 func TestStoreDoesNotChangeExistingParentDirectoryMode(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix permission semantics")

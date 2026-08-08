@@ -33,6 +33,23 @@ type Store struct {
 func NewStore(path string) *Store { return &Store{path: path, syncDir: syncDirectory} }
 func (s *Store) Path() string     { return s.path }
 
+func (s *Store) Size() (int64, error) {
+	if err := rejectSymlinkComponents(s.path); err != nil {
+		return 0, err
+	}
+	info, err := os.Lstat(s.path)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("inspect vault size: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return 0, errors.New("vault path must be a regular file")
+	}
+	return info.Size(), nil
+}
+
 func (s *Store) Load() (Document, error) {
 	if err := rejectSymlinkComponents(s.path); err != nil {
 		return Document{}, err

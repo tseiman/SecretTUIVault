@@ -3,7 +3,10 @@ package ui
 import (
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -21,6 +24,12 @@ import (
 type saver interface {
 	Save(vault.Document, bool) error
 }
+
+type vaultMetadata interface {
+	Path() string
+	Size() (int64, error)
+}
+
 type mode uint8
 
 type clipboardResultMsg struct {
@@ -57,6 +66,8 @@ type formModel struct {
 type Model struct {
 	doc            vault.Document
 	store          saver
+	metadata       vaultMetadata
+	homeDir        string
 	visible        []vault.Entry
 	selected       int
 	listOffset     int
@@ -90,7 +101,11 @@ func New(doc vault.Document, store saver) Model {
 	q.Prompt = "Search: "
 	q.Placeholder = `text, TAG:value, NAME:"words", AND`
 	d := viewport.New(40, 10)
-	m := Model{doc: doc, store: store, ascending: true, tagAscending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
+	homeDir, _ := os.UserHomeDir()
+	m := Model{doc: doc, store: store, homeDir: homeDir, ascending: true, tagAscending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
+	if metadata, ok := store.(vaultMetadata); ok {
+		m.metadata = metadata
+	}
 	m.refresh("")
 	return m
 }
@@ -688,16 +703,66 @@ func renderActionBar(width int, actions ...string) string {
 	return ansi.Truncate(strings.Join(blocks, " "), max(1, width), "…")
 }
 
+func humanFileSize(size int64) string {
+	if size < 0 {
+		size = 0
+	}
+	if size < 1_000 {
+		return fmt.Sprintf("%dB", size)
+	}
+	value, unit := float64(size)/1_000, "kB"
+	if size >= 1_000_000 {
+		value, unit = float64(size)/1_000_000, "MB"
+	}
+	formatted := strconv.FormatFloat(value, 'f', 1, 64)
+	return strings.TrimSuffix(formatted, ".0") + unit
+}
+
+func shortenHomePath(path, homeDir string) string {
+	path = filepath.Clean(path)
+	if homeDir == "" {
+		return path
+	}
+	homeDir = filepath.Clean(homeDir)
+	relative, err := filepath.Rel(homeDir, path)
+	if err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator)) {
+		if relative == "." {
+			return "~"
+		}
+		return filepath.Join("~", relative)
+	}
+	return path
+}
+
+func (m Model) statusLine(message string) string {
+	parts := make([]string, 0, 2)
+	if m.metadata != nil {
+		path := safeInline(shortenHomePath(m.metadata.Path(), m.homeDir))
+		size, err := m.metadata.Size()
+		if err != nil {
+			parts = append(parts, path+" (size unavailable)")
+		} else {
+			parts = append(parts, path+" ("+humanFileSize(size)+")")
+		}
+	}
+	if message != "" {
+		parts = append(parts, message)
+	}
+	return strings.Join(parts, "  ")
+}
+
 func (m Model) View() string {
 	header := m.renderHeader()
 	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
 	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
 	actions := []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"}
 	footer := renderActionBar(m.width, actions...)
-	status := safeInline(m.status)
-	if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "must") || strings.Contains(strings.ToLower(status), "disk") {
-		status = errorStyle.Render(status)
+	statusMessage := safeInline(m.status)
+	if strings.Contains(strings.ToLower(statusMessage), "error") || strings.Contains(strings.ToLower(statusMessage), "must") || strings.Contains(strings.ToLower(statusMessage), "disk") {
+		statusMessage = errorStyle.Render(statusMessage)
 	}
+	status := statusMessage
+	statusLine := m.statusLine(statusMessage)
 	modalActionWidth := max(1, min(74, m.width-6))
 	switch m.mode {
 	case modeForm:
@@ -709,8 +774,8 @@ func (m Model) View() string {
 			labels := []string{"Name", "Tags", "Description", "Blob (stored unchanged)"}
 			widgets := []string{m.form.name.View(), m.form.tags.View(), m.form.description.View(), m.form.blob.View()}
 			lines := []string{header, formTitle, parameterStyle.Render(labels[m.form.focus] + ":"), widgets[m.form.focus]}
-			if status != "" {
-				lines = append(lines, status)
+			if statusLine != "" {
+				lines = append(lines, statusLine)
 			}
 			lines = append(lines,
 				renderActionBar(m.width, "Tab Next", "Ctrl+S Save"),
@@ -719,7 +784,7 @@ func (m Model) View() string {
 			return m.fitView(strings.Join(lines, "\n"))
 		}
 		formActions := renderActionBar(m.width, "Tab/Shift+Tab Next", "Ctrl+T Select tags", "Ctrl+S Save", "Esc Cancel")
-		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), parameterStyle.Render("Description:"), m.form.description.View(), parameterStyle.Render("Blob (stored unchanged):"), m.form.blob.View(), status, formActions}, "\n"))
+		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), parameterStyle.Render("Description:"), m.form.description.View(), parameterStyle.Render("Blob (stored unchanged):"), m.form.blob.View(), statusLine, formActions}, "\n"))
 	case modeDelete:
 		deleteActions := renderActionBar(modalActionWidth, "Y Delete", "N Cancel", "Esc Cancel")
 		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\n%s\n%s", safeInline(m.selectedEntry().Name), deleteActions, status)))
@@ -804,7 +869,7 @@ func (m Model) View() string {
 	if narrow {
 		body = left
 	}
-	return m.fitView(strings.Join([]string{header, searchLine, body, status, footer}, "\n"))
+	return m.fitView(strings.Join([]string{header, searchLine, body, statusLine, footer}, "\n"))
 }
 
 func (m Model) renderHeader() string {
