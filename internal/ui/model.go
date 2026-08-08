@@ -678,20 +678,25 @@ func (m *Model) resizeWidgets() {
 	}
 }
 
+func renderActionBar(width int, actions ...string) string {
+	blocks := make([]string, len(actions))
+	for i, action := range actions {
+		blocks[i] = actionStyle.Render(action)
+	}
+	return ansi.Truncate(strings.Join(blocks, " "), max(1, width), "…")
+}
+
 func (m Model) View() string {
 	header := m.renderHeader()
 	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
 	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
 	actions := []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"}
-	blocks := make([]string, len(actions))
-	for i, action := range actions {
-		blocks[i] = actionStyle.Render(action)
-	}
-	footer := ansi.Truncate(strings.Join(blocks, " "), max(1, m.width), "…")
+	footer := renderActionBar(m.width, actions...)
 	status := safeInline(m.status)
 	if strings.Contains(strings.ToLower(status), "error") || strings.Contains(strings.ToLower(status), "must") || strings.Contains(strings.ToLower(status), "disk") {
 		status = errorStyle.Render(status)
 	}
+	modalActionWidth := max(1, min(74, m.width-6))
 	switch m.mode {
 	case modeForm:
 		formTitle := "Edit entry"
@@ -705,14 +710,20 @@ func (m Model) View() string {
 			if status != "" {
 				lines = append(lines, status)
 			}
-			lines = append(lines, ansi.Truncate("Tab Next • Ctrl+S Save", max(1, m.width), "…"), ansi.Truncate("Esc Cancel • F10 Quit", max(1, m.width), "…"))
+			lines = append(lines,
+				renderActionBar(m.width, "Tab Next", "Ctrl+S Save"),
+				renderActionBar(m.width, "Ctrl+T Tags", "Esc Cancel", "F10 Quit"),
+			)
 			return m.fitView(strings.Join(lines, "\n"))
 		}
-		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), "Description:", m.form.description.View(), "Blob (stored unchanged):", m.form.blob.View(), status, "Tab/Shift+Tab Next • Ctrl+T Select tags • Ctrl+S Save • Esc Cancel"}, "\n"))
+		formActions := renderActionBar(m.width, "Tab/Shift+Tab Next", "Ctrl+T Select tags", "Ctrl+S Save", "Esc Cancel")
+		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), "Description:", m.form.description.View(), "Blob (stored unchanged):", m.form.blob.View(), status, formActions}, "\n"))
 	case modeDelete:
-		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\nY Delete • N/Esc Cancel\n%s", safeInline(m.selectedEntry().Name), status)))
+		deleteActions := renderActionBar(modalActionWidth, "Y Delete", "N Cancel", "Esc Cancel")
+		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\n%s\n%s", safeInline(m.selectedEntry().Name), deleteActions, status)))
 	case modeConflict:
-		return m.fitView(header + "\n" + m.renderModal("The vault changed after it was loaded.\nO Overwrite • Enter/Esc/C Cancel\n"+status))
+		conflictActions := renderActionBar(modalActionWidth, "O Overwrite", "Enter/Esc/C Cancel")
+		return m.fitView(header + "\n" + m.renderModal("The vault changed after it was loaded.\n"+conflictActions+"\n"+status))
 	case modeTags:
 		pageEnd := min(len(m.tagOptions), m.tagOffset+m.tagPageSize())
 		rows := make([]string, 0, pageEnd-m.tagOffset)
@@ -735,13 +746,16 @@ func (m Model) View() string {
 		if !m.tagAscending {
 			tagSort = "Z-A"
 		}
-		return m.fitView(header + "\n" + m.renderModal("Select tags (Sort: "+tagSort+")\n\n"+strings.Join(rows, "\n")+"\n\n↑↓ Move • Space Toggle • S Sort • N New • Enter Apply • Esc Cancel"))
+		tagActions := renderActionBar(modalActionWidth, "↑↓ Move", "Space Toggle", "S Sort", "N New", "Enter Apply", "Esc Cancel")
+		return m.fitView(header + "\n" + m.renderModal("Select tags (Sort: "+tagSort+")\n\n"+strings.Join(rows, "\n")+"\n\n"+tagActions))
 	case modeNewTag:
-		return m.fitView(header + "\n" + m.renderModal("Create tag\n"+m.newTag.View()+"\nEnter Add • Esc Back\n"+status))
+		newTagActions := renderActionBar(modalActionWidth, "Enter Add", "Esc Back")
+		return m.fitView(header + "\n" + m.renderModal("Create tag\n"+m.newTag.View()+"\n"+newTagActions+"\n"+status))
 	case modeQuitConfirm:
-		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\nQ/Y Quit • Enter/Esc/C Continue editing"))
+		quitActions := renderActionBar(modalActionWidth, "Q/Y Quit", "Enter/Esc/C Continue editing")
+		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\n"+quitActions))
 	case modeView:
-		viewFooter := "↑↓ Scroll • B Copy blob • Esc/Enter Close"
+		viewFooter := renderActionBar(modalActionWidth, "↑↓ Scroll", "B Copy blob", "Esc/Enter Close")
 		if status != "" {
 			viewFooter = status + "\n\n" + viewFooter
 		}

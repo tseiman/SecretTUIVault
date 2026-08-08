@@ -10,6 +10,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 	"github.com/tseiman/SecretTUIVault/internal/vault"
 )
 
@@ -58,6 +59,8 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 }
 
 func TestFooterActionsUseInverseCyanBlocks(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
 	m := New(uiDocument(t), &fakeSaver{})
 	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := m.View()
@@ -66,11 +69,43 @@ func TestFooterActionsUseInverseCyanBlocks(t *testing.T) {
 			t.Fatalf("footer action %q missing: %q", action, view)
 		}
 	}
-	if _, uncolored := actionStyle.GetForeground().(lipgloss.NoColor); uncolored {
-		t.Fatal("footer action foreground has no color")
+	if got := actionStyle.GetForeground(); got != lipgloss.Color("#000000") {
+		t.Fatalf("footer foreground=%v, want true black", got)
 	}
 	if _, uncolored := actionStyle.GetBackground().(lipgloss.NoColor); uncolored {
 		t.Fatal("footer action background has no color")
+	}
+}
+
+func TestAllViewActionHintsUseInverseBlocks(t *testing.T) {
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(termenv.Ascii) })
+	base := New(uiDocument(t), &fakeSaver{})
+	form, _ := update(base, tea.KeyMsg{Type: tea.KeyF5})
+	view, _ := update(base, tea.KeyMsg{Type: tea.KeyF3})
+	deleted, _ := update(base, tea.KeyMsg{Type: tea.KeyF8})
+
+	tests := []struct {
+		name   string
+		model  Model
+		action string
+	}{
+		{"list", base, "F10 Quit"},
+		{"form", form, "Ctrl+S Save"},
+		{"view", view, "B Copy blob"},
+		{"delete", deleted, "Y Delete"},
+		{"conflict", func() Model { m := base; m.mode = modeConflict; return m }(), "O Overwrite"},
+		{"tags", func() Model { m := base; m.mode = modeTags; m.tagSelected = map[string]bool{}; return m }(), "S Sort"},
+		{"new-tag", func() Model { m := base; m.mode = modeNewTag; return m }(), "Enter Add"},
+		{"quit", func() Model { m := base; m.mode = modeQuitConfirm; return m }(), "Q/Y Quit"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			want := actionStyle.Render(tc.action)
+			if got := tc.model.View(); !strings.Contains(got, want) {
+				t.Fatalf("action %q is not rendered with inverse style: %q", tc.action, got)
+			}
+		})
 	}
 }
 
