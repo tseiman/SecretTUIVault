@@ -56,6 +56,17 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 	}
 }
 
+func TestEntriesHeadingShowsVisibleCount(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	if got := m.View(); !strings.Contains(got, "Entries (2)") {
+		t.Fatalf("initial entry count missing: %q", got)
+	}
+	m.visible = m.visible[:1]
+	if got := m.View(); !strings.Contains(got, "Entries (1)") {
+		t.Fatalf("visible entry count was not updated: %q", got)
+	}
+}
+
 func TestDetailNameStyleHasForegroundColor(t *testing.T) {
 	if _, uncolored := detailNameStyle.GetForeground().(lipgloss.NoColor); uncolored {
 		t.Fatal("detail name has no foreground color")

@@ -703,7 +703,7 @@ func (m Model) View() string {
 			rows = append(rows, line)
 		}
 	}
-	left := borderStyle.Width(max(8, listWidth-2)).Height(max(3, m.height-9)).Render("Entries\n" + strings.Join(rows, "\n"))
+	left := borderStyle.Width(max(8, listWidth-2)).Height(max(3, m.height-9)).Render(fmt.Sprintf("Entries (%d)\n%s", len(m.visible), strings.Join(rows, "\n")))
 	right := borderStyle.Width(max(8, detailWidth-2)).Height(max(3, m.height-9)).Render("Details\n" + m.detail.View())
 	body := lipgloss.JoinHorizontal(lipgloss.Top, left, " ", right)
 	if narrow {
