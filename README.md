@@ -99,6 +99,7 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `F5`: create an entry
 - `F8`: delete after confirmation
 - `F10`: quit; unsaved forms require explicit confirmation
+- `Esc`, then `3` / `4` / `5` / `8` / `0`: alternatives for `F3` / `F4` / `F5` / `F8` / `F10` (Midnight Commander style)
 - `S`: switch between name A–Z and Z–A
 - `Tab` / `Shift+Tab`: move between form fields
 - `Ctrl+T`: choose existing tags or create a new tag while editing

@@ -48,27 +48,28 @@ type formModel struct {
 }
 
 type Model struct {
-	doc         vault.Document
-	store       saver
-	visible     []vault.Entry
-	selected    int
-	listOffset  int
-	ascending   bool
-	query       textinput.Model
-	detail      viewport.Model
-	form        formModel
-	tagOptions  []string
-	tagSelected map[string]bool
-	tagCursor   int
-	tagOffset   int
-	newTag      textinput.Model
-	mode        mode
-	returnMode  mode
-	pending     *vault.Document
-	status      string
-	width       int
-	height      int
-	now         func() time.Time
+	doc          vault.Document
+	store        saver
+	visible      []vault.Entry
+	selected     int
+	listOffset   int
+	ascending    bool
+	query        textinput.Model
+	detail       viewport.Model
+	form         formModel
+	tagOptions   []string
+	tagSelected  map[string]bool
+	tagCursor    int
+	tagOffset    int
+	newTag       textinput.Model
+	mode         mode
+	returnMode   mode
+	escapePrefix bool
+	pending      *vault.Document
+	status       string
+	width        int
+	height       int
+	now          func() time.Time
 }
 
 func New(doc vault.Document, store saver) Model {
@@ -93,6 +94,23 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	key, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
+	}
+	if m.mode == modeList && !m.query.Focused() {
+		if key.Alt {
+			if alias, ok := escapeFunctionKey(key); ok {
+				key = alias
+			}
+		}
+		if m.escapePrefix {
+			m.escapePrefix = false
+			if alias, ok := escapeFunctionKey(key); ok {
+				key = alias
+			}
+		}
+		if key.Type == tea.KeyEsc {
+			m.escapePrefix = true
+			return m, nil
+		}
 	}
 	if key.Type == tea.KeyF10 {
 		if m.mode == modeForm || m.mode == modeConflict || m.mode == modeTags || m.mode == modeNewTag {
@@ -186,6 +204,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+func escapeFunctionKey(key tea.KeyMsg) (tea.KeyMsg, bool) {
+	if key.Type != tea.KeyRunes || len(key.Runes) != 1 {
+		return tea.KeyMsg{}, false
+	}
+	aliases := map[rune]tea.KeyType{
+		'3': tea.KeyF3,
+		'4': tea.KeyF4,
+		'5': tea.KeyF5,
+		'8': tea.KeyF8,
+		'0': tea.KeyF10,
+	}
+	keyType, ok := aliases[key.Runes[0]]
+	return tea.KeyMsg{Type: keyType}, ok
 }
 
 func (m *Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -666,12 +699,16 @@ func (m Model) selectedEntry() vault.Entry {
 func (m Model) selectedID() string { return m.selectedEntry().ID }
 
 func entryDetails(e vault.Entry) string {
-	return fmt.Sprintf("Name: %s\nID: %s\nTags: %s\nCreated: %s\nUpdated: %s\n\nDescription:\n%s\n\nBlob:\n%s", safeInline(e.Name), safeInline(e.ID), safeInline(strings.Join(e.Tags, ", ")), safeInline(e.Created), safeInline(e.Updated), safeMultiline(e.Description), safeMultiline(e.Blob))
+	return fmt.Sprintf("%s\nID: %s\nTags: %s\nCreated: %s\nUpdated: %s\n\nDescription:\n%s\n\nBlob:\n%s", detailNameStyle.Render("Name: "+safeInline(e.Name)), safeInline(e.ID), safeInline(strings.Join(e.Tags, ", ")), safeInline(e.Created), safeInline(e.Updated), safeMultiline(e.Description), safeMultiline(e.Blob))
 }
 
 func safeInline(value string) string { return escapeControls(value, false) }
 
-func safeMultiline(value string) string { return escapeControls(value, true) }
+func safeMultiline(value string) string {
+	value = strings.ReplaceAll(value, "\r\n", "\n")
+	value = strings.ReplaceAll(value, "\r", "\n")
+	return escapeControls(value, true)
+}
 
 func escapeControls(value string, preserveNewlines bool) string {
 	var escaped strings.Builder

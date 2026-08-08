@@ -36,6 +36,12 @@ func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	return next.(Model), cmd
 }
 
+func TestDetailNameStyleHasForegroundColor(t *testing.T) {
+	if _, uncolored := detailNameStyle.GetForeground().(lipgloss.NoColor); uncolored {
+		t.Fatal("detail name has no foreground color")
+	}
+}
+
 func TestSplitViewResizeNavigationSortAndSearch(t *testing.T) {
 	m := New(uiDocument(t), &fakeSaver{})
 	m, _ = update(m, tea.WindowSizeMsg{Width: 100, Height: 30})
@@ -145,6 +151,30 @@ func TestF10Quits(t *testing.T) {
 	_, cmd := update(m, tea.KeyMsg{Type: tea.KeyF10})
 	if cmd == nil || cmd() != tea.Quit() {
 		t.Fatal("F10 did not quit")
+	}
+}
+
+func TestEscapeDigitAliasesFunctionKeys(t *testing.T) {
+	press := func(m Model, digit rune) (Model, tea.Cmd) {
+		m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
+		return update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{digit}})
+	}
+	for _, tc := range []struct {
+		digit rune
+		mode  mode
+	}{{'3', modeView}, {'4', modeForm}, {'5', modeForm}, {'8', modeDelete}} {
+		m, _ := press(New(uiDocument(t), &fakeSaver{}), tc.digit)
+		if m.mode != tc.mode {
+			t.Fatalf("Esc+%c mode=%v, want %v", tc.digit, m.mode, tc.mode)
+		}
+	}
+	_, cmd := press(New(uiDocument(t), &fakeSaver{}), '0')
+	if cmd == nil || cmd() != tea.Quit() {
+		t.Fatal("Esc+0 did not act as F10")
+	}
+	m, _ := update(New(uiDocument(t), &fakeSaver{}), tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}, Alt: true})
+	if m.mode != modeView {
+		t.Fatalf("terminal-decoded Alt+3 mode=%v, want view", m.mode)
 	}
 }
 
@@ -336,6 +366,24 @@ func TestCommittedWarningStillUpdatesInMemoryDocument(t *testing.T) {
 	}
 	if !strings.Contains(strings.ToLower(m.status), "warning") {
 		t.Fatalf("committed durability warning not shown: %q", m.status)
+	}
+}
+
+func TestCarriageReturnsRenderAsLineBreaksInSplitAndF3Views(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "\r-----BEGIN PGP MESSAGE-----\rComment: placeholder\r\rbody"
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.WindowSizeMsg{Width: 100, Height: 30})
+	want := "\n-----BEGIN PGP MESSAGE-----\nComment: placeholder\n\nbody"
+	if got := entryDetails(doc.Entries[0]); !strings.Contains(got, want) || strings.Contains(got, `\x0d`) {
+		t.Fatalf("detail content did not normalize carriage returns:\n%q", got)
+	}
+	if got := m.detail.View(); strings.Contains(got, `\x0d`) || !strings.Contains(got, "-----BEGIN PGP MESSAGE-----") || !strings.Contains(got, "Comment: placeholder") {
+		t.Fatalf("split detail did not render normalized lines:\n%q", got)
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
+	if got := m.View(); strings.Contains(got, `\x0d`) || !strings.Contains(got, "-----BEGIN PGP MESSAGE-----") || !strings.Contains(got, "Comment: placeholder") {
+		t.Fatalf("F3 view did not render normalized lines:\n%q", got)
 	}
 }
 
