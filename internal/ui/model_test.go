@@ -36,6 +36,19 @@ func update(m Model, msg tea.Msg) (Model, tea.Cmd) {
 	return next.(Model), cmd
 }
 
+func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m.gitVersion = "0ea17c7"
+	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
+	header := strings.SplitN(m.View(), "\n", 2)[0]
+	if width := lipgloss.Width(header); width != 80 {
+		t.Fatalf("header width=%d, want 80: %q", width, header)
+	}
+	if !strings.HasSuffix(header, "0ea17c7") {
+		t.Fatalf("Git version is not right-aligned: %q", header)
+	}
+}
+
 func TestDetailNameStyleHasForegroundColor(t *testing.T) {
 	if _, uncolored := detailNameStyle.GetForeground().(lipgloss.NoColor); uncolored {
 		t.Fatal("detail name has no foreground color")
@@ -377,8 +390,17 @@ func TestF3ViewFitsEightyColumnsAndKeepsArmorLinesUnwrapped(t *testing.T) {
 	m, _ = update(m, tea.WindowSizeMsg{Width: 120, Height: 35})
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
 	view := m.View()
-	if width := lipgloss.Width(view); width > 80 {
-		t.Fatalf("F3 view width=%d exceeds 80 columns", width)
+	lines := strings.Split(view, "\n")
+	modalWidth := 0
+	for _, line := range lines {
+		start, end := strings.Index(line, "╔"), strings.LastIndex(line, "╗")
+		if start >= 0 && end >= start {
+			modalWidth = lipgloss.Width(line[start : end+len("╗")])
+			break
+		}
+	}
+	if modalWidth == 0 || modalWidth > 80 {
+		t.Fatalf("F3 modal width=%d, want 1..80 columns", modalWidth)
 	}
 	if !strings.Contains(view, armorLine) {
 		t.Fatalf("65-character armor line was wrapped:\n%s", view)

@@ -70,6 +70,7 @@ type Model struct {
 	status       string
 	width        int
 	height       int
+	gitVersion   string
 	now          func() time.Time
 }
 
@@ -79,7 +80,7 @@ func New(doc vault.Document, store saver) Model {
 	q.Prompt = "Search: "
 	q.Placeholder = `text, TAG:value, NAME:"words", AND`
 	d := viewport.New(40, 10)
-	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, now: time.Now}
+	m := Model{doc: doc, store: store, ascending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), now: time.Now}
 	m.refresh("")
 	return m
 }
@@ -613,7 +614,7 @@ func (m *Model) resizeWidgets() {
 }
 
 func (m Model) View() string {
-	header := ansi.Truncate(titleStyle.Render("SecretTUIVault")+"  "+mutedStyle.Render(sortLabel(m.ascending)), max(1, m.width), "…")
+	header := m.renderHeader()
 	footerText := "↑↓ Navigate  / Search  S Sort  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
 	if m.width < 70 {
 		footerText = "↑↓ Nav  / Search  F3 View  F4 Edit  F5 New  F10 Quit"
@@ -700,6 +701,22 @@ func (m Model) View() string {
 		body = left
 	}
 	return m.fitView(strings.Join([]string{header, m.query.View(), body, status, footer}, "\n"))
+}
+
+func (m Model) renderHeader() string {
+	width := max(1, m.width)
+	left := titleStyle.Render("SecretTUIVault") + "  " + mutedStyle.Render(sortLabel(m.ascending))
+	right := m.gitVersion
+	if right == "" {
+		right = "dev"
+	}
+	rightWidth := lipgloss.Width(right)
+	if rightWidth >= width {
+		return ansi.Truncate(right, width, "…")
+	}
+	left = ansi.Truncate(left, max(1, width-rightWidth-1), "…")
+	gap := max(1, width-lipgloss.Width(left)-rightWidth)
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func (m Model) fitView(content string) string {
