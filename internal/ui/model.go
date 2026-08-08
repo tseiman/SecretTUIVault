@@ -622,6 +622,8 @@ func (m *Model) resizeWidgets() {
 
 func (m Model) View() string {
 	header := m.renderHeader()
+	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
+	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
 	footerText := "↑↓ Navigate  / Search  S Sort  B Copy  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
 	if m.width < 70 {
 		footerText = "↑↓ Nav  / Search  B Copy  F3 View  F4 Edit  F5 New  F10 Quit"
@@ -707,12 +709,12 @@ func (m Model) View() string {
 	if narrow {
 		body = left
 	}
-	return m.fitView(strings.Join([]string{header, m.query.View(), body, status, footer}, "\n"))
+	return m.fitView(strings.Join([]string{header, searchLine, body, status, footer}, "\n"))
 }
 
 func (m Model) renderHeader() string {
 	width := max(1, m.width)
-	left := titleStyle.Render("SecretTUIVault") + "  " + mutedStyle.Render("Sort: "+sortLabel(m.ascending))
+	left := titleStyle.Render("SecretTUIVault")
 	right := m.gitVersion
 	if right == "" {
 		right = "dev"

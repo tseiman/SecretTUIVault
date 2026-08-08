@@ -47,8 +47,12 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 	if !strings.HasSuffix(header, "0ea17c7") {
 		t.Fatalf("Git version is not right-aligned: %q", header)
 	}
-	if !strings.Contains(header, "Sort: Name ↑") {
-		t.Fatalf("sort indicator is unclear: %q", header)
+	if strings.Contains(header, "Sort:") || strings.Contains(header, "Name ↑") {
+		t.Fatalf("sort indicator must not be in header: %q", header)
+	}
+	lines := strings.Split(m.View(), "\n")
+	if len(lines) < 2 || !strings.Contains(lines[1], "Sort: Name ↑  Search:") {
+		t.Fatalf("sort indicator is not before Search: %q", m.View())
 	}
 }
 
