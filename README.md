@@ -98,7 +98,7 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `B` in the main or F3 view: show only the selected blob without borders or metadata for clean terminal selection; `B`, `Esc`, or `Enter` returns to the previous view
 - `F4`: edit the selected entry
 - `F5`: create an entry
-- `F8`: delete after confirmation
+- `F8`: open deletion confirmation; only `Y` deletes, while `N` or `Esc` cancels (`Enter` does nothing)
 - `F10`: quit; unsaved forms require explicit confirmation
 - `Esc`, then `3` / `4` / `5` / `8` / `0`: alternatives for `F3` / `F4` / `F5` / `F8` / `F10` (Midnight Commander style)
 - `S`: switch the `Sort: Name ↑` / `Sort: Name ↓` indicator before the search field between name A–Z and Z–A; this UI state is not stored in the vault YAML

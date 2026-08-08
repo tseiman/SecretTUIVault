@@ -125,9 +125,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeForm:
 		return m.updateForm(key)
 	case modeDelete:
-		if key.Type == tea.KeyEsc {
+		if key.Type == tea.KeyEsc || strings.EqualFold(key.String(), "n") {
 			m.mode, m.status = modeList, "Deletion cancelled"
-		} else if key.Type == tea.KeyEnter || strings.EqualFold(key.String(), "y") {
+		} else if strings.EqualFold(key.String(), "y") {
 			m.deleteSelected()
 		}
 		return m, nil
@@ -651,7 +651,7 @@ func (m Model) View() string {
 		}
 		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), "Description:", m.form.description.View(), "Blob (stored unchanged):", m.form.blob.View(), status, "Tab/Shift+Tab Next • Ctrl+T Select tags • Ctrl+S Save • Esc Cancel"}, "\n"))
 	case modeDelete:
-		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\nEnter/Y Delete • Esc Cancel\n%s", safeInline(m.selectedEntry().Name), status)))
+		return m.fitView(header + "\n" + m.renderModal(fmt.Sprintf("Delete %q?\nY Delete • N/Esc Cancel\n%s", safeInline(m.selectedEntry().Name), status)))
 	case modeConflict:
 		return m.fitView(header + "\n" + m.renderModal("The vault changed after it was loaded.\nO Overwrite • Enter/Esc/C Cancel\n"+status))
 	case modeTags:

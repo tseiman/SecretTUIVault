@@ -144,8 +144,17 @@ func TestCreateEditViewDeleteAndCancellation(t *testing.T) {
 	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF8})
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if len(m.doc.Entries) != 3 || m.mode != modeDelete {
+		t.Fatal("Enter must not confirm deletion")
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	if len(m.doc.Entries) != 3 || m.mode != modeList {
+		t.Fatal("N did not cancel deletion")
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF8})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if len(m.doc.Entries) != 2 {
-		t.Fatal("confirmed delete failed")
+		t.Fatal("Y did not confirm deletion")
 	}
 }
 
@@ -153,7 +162,7 @@ func TestConflictModalOverwriteCancelAndErrors(t *testing.T) {
 	store := &fakeSaver{err: vault.ErrConflict}
 	m := New(uiDocument(t), store)
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF8})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	if m.mode != modeConflict || len(m.doc.Entries) != 2 {
 		t.Fatal("conflict should preserve current document")
 	}
@@ -162,7 +171,7 @@ func TestConflictModalOverwriteCancelAndErrors(t *testing.T) {
 		t.Fatal("safe default conflict cancellation was destructive")
 	}
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF8})
-	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
 	store.err = nil
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'o'}})
 	if len(m.doc.Entries) != 1 || !store.forces[len(store.forces)-1] {
