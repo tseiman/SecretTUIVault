@@ -1,6 +1,6 @@
 # SecretTUIVault
-
 SecretTUIVault is a lightweight, offline terminal user interface for organizing opaque text blobs such as externally generated ASCII-armored GPG messages. Metadata stays readable and searchable; blob content is stored exactly as entered in one human-readable YAML file.
+<img src="ScreenShot_SecretTUIVault.svg" width="600">
 
 > [!IMPORTANT]
 > SecretTUIVault does **not** encrypt, decrypt, validate, or execute blob content. It never invokes GPG. Encrypt sensitive plaintext externally before adding it to a vault. Names, descriptions, and tags are stored in plaintext and must not contain passwords, PINs, recovery answers, or other secret material.
