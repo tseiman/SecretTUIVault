@@ -47,6 +47,9 @@ func TestHeaderShowsGitVersionAtRightEdge(t *testing.T) {
 	if !strings.HasSuffix(header, "0ea17c7") {
 		t.Fatalf("Git version is not right-aligned: %q", header)
 	}
+	if !strings.Contains(header, "Sort: Name ↑") {
+		t.Fatalf("sort indicator is unclear: %q", header)
+	}
 }
 
 func TestDetailNameStyleHasForegroundColor(t *testing.T) {
@@ -420,6 +423,20 @@ func TestF3BlobCopyViewContainsOnlyDisplaySafeBlob(t *testing.T) {
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
 	if m.mode != modeView {
 		t.Fatalf("Esc from copy view mode=%v, want F3 view", m.mode)
+	}
+}
+
+func TestBOpensBlobCopyViewDirectlyFromMainView(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "copy-only blob\n"
+	m := New(doc, &fakeSaver{})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	if got := m.View(); got != doc.Entries[0].Blob {
+		t.Fatalf("B did not open direct blob copy view: %q", got)
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeList {
+		t.Fatalf("Esc returned to mode=%v, want main view", m.mode)
 	}
 }
 

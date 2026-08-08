@@ -157,6 +157,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if strings.EqualFold(key.String(), "b") {
+			m.returnMode = modeView
 			m.mode = modeBlobCopy
 			return m, nil
 		}
@@ -165,7 +166,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, cmd
 	case modeBlobCopy:
 		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || strings.EqualFold(key.String(), "b") {
-			m.mode = modeView
+			m.mode = m.returnMode
 			m.resizeWidgets()
 		}
 		return m, nil
@@ -211,6 +212,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch key.String() {
 		case "/":
 			m.query.Focus()
+		case "b", "B":
+			if len(m.visible) > 0 {
+				m.returnMode = modeList
+				m.mode = modeBlobCopy
+				m.resizeWidgets()
+			}
 		case "s", "S":
 			id := m.selectedID()
 			m.ascending = !m.ascending
@@ -615,9 +622,9 @@ func (m *Model) resizeWidgets() {
 
 func (m Model) View() string {
 	header := m.renderHeader()
-	footerText := "↑↓ Navigate  / Search  S Sort  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
+	footerText := "↑↓ Navigate  / Search  S Sort  B Copy  F3 View  F4 Edit  F5 New  F8 Delete  F10 Quit"
 	if m.width < 70 {
-		footerText = "↑↓ Nav  / Search  F3 View  F4 Edit  F5 New  F10 Quit"
+		footerText = "↑↓ Nav  / Search  B Copy  F3 View  F4 Edit  F5 New  F10 Quit"
 	}
 	footer := mutedStyle.Render(ansi.Truncate(footerText, max(1, m.width), "…"))
 	status := safeInline(m.status)
@@ -705,7 +712,7 @@ func (m Model) View() string {
 
 func (m Model) renderHeader() string {
 	width := max(1, m.width)
-	left := titleStyle.Render("SecretTUIVault") + "  " + mutedStyle.Render(sortLabel(m.ascending))
+	left := titleStyle.Render("SecretTUIVault") + "  " + mutedStyle.Render("Sort: "+sortLabel(m.ascending))
 	right := m.gitVersion
 	if right == "" {
 		right = "dev"

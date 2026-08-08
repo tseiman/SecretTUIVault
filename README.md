@@ -95,13 +95,13 @@ The parent directory and vault file are created on the first save. On Unix-like 
 - `↑` / `↓`: select an entry
 - `/`: focus search
 - `Enter` or `F3`: open the complete selected entry in a view up to 80 columns wide
-- `B` in the F3 view: show only the blob without borders or metadata for clean terminal selection; `B`, `Esc`, or `Enter` returns
+- `B` in the main or F3 view: show only the selected blob without borders or metadata for clean terminal selection; `B`, `Esc`, or `Enter` returns to the previous view
 - `F4`: edit the selected entry
 - `F5`: create an entry
 - `F8`: delete after confirmation
 - `F10`: quit; unsaved forms require explicit confirmation
 - `Esc`, then `3` / `4` / `5` / `8` / `0`: alternatives for `F3` / `F4` / `F5` / `F8` / `F10` (Midnight Commander style)
-- `S`: switch between name A–Z and Z–A
+- `S`: switch the `Sort: Name ↑` / `Sort: Name ↓` header indicator between name A–Z and Z–A; this UI state is not stored in the vault YAML
 - `Tab` / `Shift+Tab`: move between form fields
 - `Ctrl+T`: choose existing tags or create a new tag while editing
 - `Ctrl+S`: save a form
