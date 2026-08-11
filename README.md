@@ -26,30 +26,42 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 ## Requirements
 
 - Go 1.26 or newer to build from source
+- GNU Make; Windows installations also require PowerShell
 - A UTF-8 terminal with color and function-key support
 - GnuPG 2.x is optional and only required for `D` decryption; `gpg` must be available on `PATH` with a working GPG Agent and Pinentry setup
 - Clipboard copy on Linux/Unix needs `wl-clipboard` (`wl-copy`/`wl-paste`) on Wayland or `xclip`/`xsel` on X11. macOS and Windows need no additional clipboard package.
 
 ## Installation from source
 
+### Linux and macOS
+
 ```console
 git clone git@github.com:tseiman/SecretTUIVault.git
 cd SecretTUIVault
 make build
+sudo make install
+secretvault --version
 ```
 
-Install the binary somewhere on your `PATH`, for example on Linux or macOS:
+`make install` installs to `/usr/local/bin/secretvault` by default. To install without elevated privileges, choose a directory already on your `PATH`:
 
 ```console
-install -m 0755 secretvault "$HOME/.local/bin/secretvault"
+make install BINDIR="$HOME/.local/bin"
 ```
 
-PowerShell example for Windows:
+### Windows
 
-```powershell
-New-Item -ItemType Directory -Force "$HOME\bin" | Out-Null
-Copy-Item .\secretvault.exe "$HOME\bin\secretvault.exe"
+Run from a terminal that provides GNU Make and PowerShell:
+
+```console
+git clone git@github.com:tseiman/SecretTUIVault.git
+cd SecretTUIVault
+make build
+make install
+secretvault --version
 ```
+
+On Windows, Make detects `OS=Windows_NT`, installs `secretvault.exe` to `%LOCALAPPDATA%\Programs\SecretTUIVault`, and adds that directory to the current user's `PATH` when necessary. Open a new terminal after the first installation. Override the destination with `make install INSTALL_DIR=C:/path/to/bin`.
 
 ## Cross-platform builds
 
