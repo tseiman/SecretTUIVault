@@ -841,10 +841,7 @@ func (m Model) View() string {
 	header := m.renderHeader()
 	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
 	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
-	footer := strings.Join([]string{
-		renderActionBar(m.width, "↑↓ Navigate", "/ Search", "S Sort", "B Copy", "D Decrypt"),
-		renderActionBar(m.width, "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"),
-	}, "\n")
+	footer := renderActionBar(m.width, "↑↓ Nav", "/ Search", "S Sort", "B Copy", "D Decrypt", "F3 View", "F4 Edit", "F5 New", "F8 Del", "F10 Quit")
 	statusMessage := safeInline(m.status)
 	if strings.Contains(strings.ToLower(statusMessage), "error") || strings.Contains(strings.ToLower(statusMessage), "must") || strings.Contains(strings.ToLower(statusMessage), "disk") {
 		statusMessage = errorStyle.Render(statusMessage)

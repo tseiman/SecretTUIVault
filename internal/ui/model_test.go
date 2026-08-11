@@ -78,7 +78,7 @@ func TestFooterActionsUseInverseCyanBlocks(t *testing.T) {
 	m := New(uiDocument(t), &fakeSaver{})
 	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := m.View()
-	for _, action := range []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "D Decrypt", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"} {
+	for _, action := range []string{"↑↓ Nav", "/ Search", "S Sort", "B Copy", "D Decrypt", "F3 View", "F4 Edit", "F5 New", "F8 Del", "F10 Quit"} {
 		if !strings.Contains(view, action) {
 			t.Fatalf("footer action %q missing: %q", action, view)
 		}
