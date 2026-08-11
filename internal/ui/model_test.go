@@ -571,8 +571,9 @@ func TestEditWithoutTouchingBlobPreservesOpaqueBytes(t *testing.T) {
 	}
 }
 
-func TestBracketedPasteStoresBlobBytesExactly(t *testing.T) {
-	raw := "-----BEGIN-----\r\nline\tvalue\x00\r\n-----END-----\r\n"
+func TestBracketedPasteNormalizesBlobLineEndings(t *testing.T) {
+	raw := "-----BEGIN-----\r\nline	value\x00\r-----END-----\r\n"
+	want := "-----BEGIN-----\nline	value\x00\n-----END-----\n"
 	store := &fakeSaver{}
 	m := New(uiDocument(t), store)
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF5})
@@ -581,8 +582,8 @@ func TestBracketedPasteStoresBlobBytesExactly(t *testing.T) {
 	m.focusForm()
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(raw), Paste: true})
 	m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlS})
-	if len(store.saved) != 1 || store.saved[0].Entries[2].Blob != raw {
-		t.Fatalf("pasted blob changed from %q to %q", raw, store.saved[0].Entries[2].Blob)
+	if len(store.saved) != 1 || store.saved[0].Entries[2].Blob != want {
+		t.Fatalf("pasted blob line endings = %q, want %q", store.saved[0].Entries[2].Blob, want)
 	}
 }
 
@@ -745,9 +746,9 @@ func TestRenderedVaultTextCannotEmitTerminalControls(t *testing.T) {
 	}
 }
 
-func TestDecryptFromListUsesExactBlobAndShowsScrollableResult(t *testing.T) {
+func TestDecryptFromListNormalizesBlobLineEndingsAndShowsScrollableResult(t *testing.T) {
 	doc := uiDocument(t)
-	doc.Entries[0].Blob = "armored\r\nblob\n"
+	doc.Entries[0].Blob = "armored\r\nblob\rfooter\n"
 	m := New(doc, &fakeSaver{})
 	var received string
 	m.decrypt = func(_ context.Context, input []byte) (internalgpg.Result, error) {
@@ -760,8 +761,8 @@ func TestDecryptFromListUsesExactBlobAndShowsScrollableResult(t *testing.T) {
 		t.Fatalf("decrypt start mode=%v cmd=%v", m.mode, cmd)
 	}
 	m, _ = update(m, cmd())
-	if received != doc.Entries[0].Blob {
-		t.Fatalf("GPG input = %q, want exact blob %q", received, doc.Entries[0].Blob)
+	if received != "armored\nblob\nfooter\n" {
+		t.Fatalf("GPG input line endings = %q", received)
 	}
 	if m.mode != modeDecrypted {
 		t.Fatalf("result mode=%v", m.mode)
@@ -795,15 +796,20 @@ func TestDecryptFromF3ReturnsToF3(t *testing.T) {
 	}
 }
 
-func TestDecryptFailureReturnsToOriginWithoutPlaintext(t *testing.T) {
+func TestDecryptFailureStaysVisibleUntilConfirmedWithoutDuplicatePrefix(t *testing.T) {
 	m := New(uiDocument(t), &fakeSaver{})
 	m.decrypt = func(context.Context, []byte) (internalgpg.Result, error) {
-		return internalgpg.Result{}, errors.New("no matching secret key")
+		return internalgpg.Result{}, errors.New("GPG decryption failed: exit status 2")
 	}
 	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
 	m, _ = update(m, cmd())
-	if m.mode != modeList || !strings.Contains(m.status, "GPG decryption failed") || m.decryptedPlaintext != "" {
-		t.Fatalf("failure mode=%v status=%q plaintext=%q", m.mode, m.status, m.decryptedPlaintext)
+	view := m.View()
+	if m.mode != modeDecrypted || strings.Count(view, "GPG decryption failed") != 1 || m.decryptedPlaintext != "" {
+		t.Fatalf("failure mode=%v view=%q plaintext=%q", m.mode, view, m.decryptedPlaintext)
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeList {
+		t.Fatalf("confirmed failure returned to mode=%v", m.mode)
 	}
 }
 

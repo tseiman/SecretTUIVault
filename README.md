@@ -1,5 +1,5 @@
 # SecretTUIVault
-SecretTUIVault is a lightweight, offline terminal user interface for organizing opaque text blobs such as externally generated ASCII-armored GPG messages. Metadata stays readable and searchable; blob content is stored exactly as entered in one human-readable YAML file.
+SecretTUIVault is a lightweight, offline terminal user interface for organizing opaque text blobs such as externally generated ASCII-armored GPG messages. Metadata stays readable and searchable; blob content is stored in one human-readable YAML file with text line endings normalized to LF.
 
 <a href="https://raw.githubusercontent.com/tseiman/SecretTUIVault/main/ScreenShot_SecretTUIVault.svg">
   <img src="ScreenShot_SecretTUIVault.svg" width="400">
@@ -7,7 +7,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 
 
 > [!IMPORTANT]
-> SecretTUIVault never encrypts or modifies blob content. Encryption remains external. On explicit request with `D`, it can pass the exact selected blob to a local GnuPG 2.x process for temporary, view-only decryption. GnuPG Agent and Pinentry alone handle passphrases; SecretTUIVault never requests, receives, or stores them. Names, descriptions, and tags are stored in plaintext and must not contain passwords, PINs, recovery answers, or other secret material.
+> SecretTUIVault never encrypts blob content. Encryption remains external. New and edited blobs normalize CRLF and CR line endings to LF. On explicit request with `D`, it passes the selected blob with the same safe line-ending normalization to a local GnuPG 2.x process for temporary, view-only decryption. GnuPG Agent and Pinentry alone handle passphrases; SecretTUIVault never requests, receives, or stores them. Names, descriptions, and tags are stored in plaintext and must not contain passwords, PINs, recovery answers, or other secret material.
 
 ## Features
 
@@ -105,7 +105,7 @@ The bottom status line shows the YAML path, current on-disk size, and status mes
 - `/`: focus search
 - `Enter` or `F3`: open the complete selected entry in a view up to 80 columns wide
 - `B` in the main or F3 view: copy the exact selected blob to the operating-system clipboard. Success is reported in the status line. If clipboard access fails, a borderless blob-only view opens for manual selection; `B`, `Esc`, or `Enter` returns to the previous view.
-- `D` in the main or F3 view: pass the exact selected blob to `gpg --decrypt` through standard input and show the text result in a scrollable, view-only modal. GPG Agent/Pinentry handles any passphrase prompt. `Esc` cancels a running operation; `Esc` or `Enter` closes a result.
+- `D` in the main or F3 view: normalize CRLF and CR line endings to LF, pass the selected blob to `gpg --decrypt` through standard input, and show the text result in a scrollable, view-only modal. A failure remains visible until `Esc` or `Enter` closes it. GPG Agent/Pinentry handles any passphrase prompt. `Esc` cancels a running operation; `Esc` or `Enter` closes a result.
 - `F4`: edit the selected entry
 - `F5`: create an entry
 - `F8`: open deletion confirmation; only `Y` deletes, while `N` or `Esc` cancels (`Enter` does nothing)
@@ -187,7 +187,7 @@ The YAML file is intentionally readable and diff-friendly, but edit it carefully
 - Metadata and tags are plaintext.
 - Blob content is opaque; plaintext is accepted if supplied.
 - Pressing `B` sends the exact blob to the operating-system clipboard. Clipboard managers, history, synchronization, and other applications may retain or read it; use this feature only when that exposure is acceptable.
-- Pressing `D` starts `gpg --batch --no-tty --pinentry-mode ask --status-fd 2 --decrypt` directly without a shell and supplies the exact blob through standard input. No passphrase option or loopback Pinentry mode is used.
+- Pressing `D` starts `gpg --batch --no-tty --pinentry-mode ask --status-fd 2 --decrypt` directly without a shell and supplies the blob through standard input after normalizing CRLF and CR line endings to LF. No passphrase option or loopback Pinentry mode is used.
 - Decrypted text is kept only in memory for the temporary view, is never written to YAML or automatically copied, and is discarded from the UI model when the view closes. Output is limited to 8 MiB; binary or non-UTF-8 plaintext is rejected.
 - Signature state reported by GPG is shown as `none`, `valid`, `invalid`, or `unverified` above the decrypted text. Invalid or unverifiable signatures are warnings and are not silently presented as valid.
 - The complete selected blob is displayed in the terminal.

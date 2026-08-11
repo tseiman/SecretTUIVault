@@ -106,6 +106,7 @@ type Model struct {
 	decryptCancel      context.CancelFunc
 	decryptID          uint64
 	decryptSignature   internalgpg.SignatureStatus
+	decryptError       string
 	decryptedPlaintext string
 	manualBlob         string
 	now                func() time.Time
@@ -148,11 +149,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.decryptCancel = nil
 		if result.err != nil {
-			m.mode = m.returnMode
 			m.decryptedPlaintext = ""
-			m.status = "GPG decryption failed: " + result.err.Error()
+			m.decryptedView.SetContent("")
+			m.decryptError = formatDecryptError(result.err)
+			m.mode, m.status = modeDecrypted, ""
+			m.resizeWidgets()
 			return m, nil
 		}
+		m.decryptError = ""
 		m.decryptedPlaintext = result.result.Plaintext
 		m.decryptSignature = result.result.Signature
 		m.decryptedView.SetContent(safeMultiline(result.result.Plaintext))
@@ -240,6 +244,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modeDecrypted:
 		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter {
 			m.mode = m.returnMode
+			m.decryptError = ""
 			m.decryptedPlaintext = ""
 			m.decryptedView.SetContent("")
 			m.resizeWidgets()
@@ -358,10 +363,11 @@ func (m Model) startDecrypt(returnMode mode) (tea.Model, tea.Cmd) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m.decryptID++
 	id := m.decryptID
-	input := append([]byte(nil), []byte(m.selectedEntry().Blob)...)
+	input := []byte(normalizeLineEndings(m.selectedEntry().Blob))
 	decrypt := m.decrypt
 	m.returnMode = returnMode
 	m.decryptCancel = cancel
+	m.decryptError = ""
 	m.decryptedPlaintext = ""
 	m.mode, m.status = modeDecrypting, "Waiting for GPG Pinentry"
 	return m, func() tea.Msg {
@@ -617,6 +623,7 @@ func (m *Model) saveForm() {
 	} else if m.form.editID == "" || m.form.blobDirty || m.form.blob.Value() != m.form.blobInitial {
 		blob = m.form.blob.Value()
 	}
+	blob = normalizeLineEndings(blob)
 	candidate := cloneDocument(m.doc)
 	if m.form.editID == "" {
 		entry, err := vault.NewEntry(name, m.form.description.Value(), tags, blob, m.doc.CanonicalTags(), m.now())
@@ -910,6 +917,10 @@ func (m Model) View() string {
 		decryptActions := renderActionBar(modalActionWidth, "Esc Cancel", "F10 Quit")
 		return m.fitView(header + "\n" + m.renderModal("Decrypting with GPG\n\nWaiting for GPG Agent / Pinentry…\n\n"+decryptActions))
 	case modeDecrypted:
+		if m.decryptError != "" {
+			decryptActions := renderActionBar(modalActionWidth, "Esc/Enter Close", "F10 Quit")
+			return m.fitView(header + "\n" + m.renderModal("GPG decryption error\n\n"+errorStyle.Render(safeMultiline(m.decryptError))+"\n\n"+decryptActions))
+		}
 		signature := "Signature: " + string(m.decryptSignature)
 		if m.decryptSignature == internalgpg.SignatureInvalid || m.decryptSignature == internalgpg.SignatureUnverified {
 			signature = errorStyle.Render(signature)
@@ -1019,9 +1030,21 @@ func entryDetails(e vault.Entry) string {
 func safeInline(value string) string { return escapeControls(value, false) }
 
 func safeMultiline(value string) string {
+	return escapeControls(normalizeLineEndings(value), true)
+}
+
+func normalizeLineEndings(value string) string {
 	value = strings.ReplaceAll(value, "\r\n", "\n")
-	value = strings.ReplaceAll(value, "\r", "\n")
-	return escapeControls(value, true)
+	return strings.ReplaceAll(value, "\r", "\n")
+}
+
+func formatDecryptError(err error) string {
+	const prefix = "GPG decryption failed: "
+	message := strings.TrimSpace(err.Error())
+	if strings.HasPrefix(strings.ToLower(message), strings.ToLower(prefix)) {
+		return message
+	}
+	return prefix + message
 }
 
 func escapeControls(value string, preserveNewlines bool) string {
