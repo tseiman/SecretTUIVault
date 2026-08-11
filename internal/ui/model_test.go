@@ -587,6 +587,60 @@ func TestBracketedPasteNormalizesBlobLineEndings(t *testing.T) {
 	}
 }
 
+func TestCtrlUAndCtrlRClearAndRestoreFocusedEditField(t *testing.T) {
+	tests := []struct {
+		name     string
+		focus    int
+		original string
+		change   func(*Model)
+		value    func(Model) string
+	}{
+		{"name", 0, "Alpha", func(m *Model) { m.form.name.SetValue("changed") }, func(m Model) string { return m.form.name.Value() }},
+		{"tags", 1, "Linux", func(m *Model) { m.form.tags.SetValue("changed") }, func(m Model) string { return m.form.tags.Value() }},
+		{"description", 2, "first description", func(m *Model) { m.form.description.SetValue("line one\nline two") }, func(m Model) string { return m.form.description.Value() }},
+		{"blob", 3, "alpha blob\n", func(m *Model) { m.form.blob.SetValue("line one\nline two") }, func(m Model) string { return m.form.blob.Value() }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			m := New(uiDocument(t), &fakeSaver{})
+			m, _ = update(m, tea.KeyMsg{Type: tea.KeyF4})
+			test.change(&m)
+			m.form.focus = test.focus
+			m.focusForm()
+
+			m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlU})
+			if got := test.value(m); got != "" {
+				t.Fatalf("Ctrl+U value=%q, want empty", got)
+			}
+			m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlR})
+			if got := test.value(m); got != test.original {
+				t.Fatalf("Ctrl+R value=%q, want original %q", got, test.original)
+			}
+		})
+	}
+}
+
+func TestNewFormRestoresEmptyFieldAndShowsClearRestoreActions(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF5})
+	m.form.name.SetValue("temporary")
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlU})
+	if got := m.form.name.Value(); got != "" {
+		t.Fatalf("Ctrl+U new name=%q, want empty", got)
+	}
+	m.form.name.SetValue("temporary")
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyCtrlR})
+	if got := m.form.name.Value(); got != "" {
+		t.Fatalf("Ctrl+R new name=%q, want initial empty value", got)
+	}
+	view := m.View()
+	for _, action := range []string{"Ctrl+U Clear field", "Ctrl+R Restore"} {
+		if !strings.Contains(view, action) {
+			t.Fatalf("new form action %q missing: %q", action, view)
+		}
+	}
+}
+
 func TestCommittedWarningStillUpdatesInMemoryDocument(t *testing.T) {
 	store := &fakeSaver{err: &vault.CommittedError{Err: errors.New("directory sync failed")}}
 	m := New(uiDocument(t), store)

@@ -60,17 +60,20 @@ const (
 )
 
 type formModel struct {
-	name            textinput.Model
-	tags            textinput.Model
-	description     textarea.Model
-	blob            textarea.Model
-	blobOriginal    string
-	blobInitial     string
-	blobDirty       bool
-	blobPasted      string
-	blobPasteActive bool
-	focus           int
-	editID          string
+	name               textinput.Model
+	tags               textinput.Model
+	description        textarea.Model
+	blob               textarea.Model
+	nameInitial        string
+	tagsInitial        string
+	descriptionInitial string
+	blobOriginal       string
+	blobInitial        string
+	blobDirty          bool
+	blobPasted         string
+	blobPasteActive    bool
+	focus              int
+	editID             string
 }
 
 type Model struct {
@@ -381,6 +384,16 @@ func (m *Model) updateForm(key tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.mode, m.status = modeList, "Edit cancelled"
 		return *m, nil
 	}
+	if key.Type == tea.KeyCtrlU {
+		m.setFocusedFormValue("")
+		m.status = "Field cleared"
+		return *m, nil
+	}
+	if key.Type == tea.KeyCtrlR {
+		m.restoreFocusedFormValue()
+		m.status = "Field restored"
+		return *m, nil
+	}
 	if key.Type == tea.KeyCtrlS {
 		m.saveForm()
 		return *m, nil
@@ -586,11 +599,41 @@ func (m *Model) openForm(entry vault.Entry) {
 	blob.SetValue(entry.Blob)
 	m.form = formModel{
 		name: name, tags: tags, description: desc, blob: blob,
+		nameInitial: name.Value(), tagsInitial: tags.Value(), descriptionInitial: desc.Value(),
 		blobOriginal: entry.Blob, blobInitial: blob.Value(), editID: entry.ID,
 	}
 	m.mode, m.status = modeForm, ""
 	m.focusForm()
 	m.resizeWidgets()
+}
+
+func (m *Model) setFocusedFormValue(value string) {
+	switch m.form.focus {
+	case 0:
+		m.form.name.SetValue(value)
+	case 1:
+		m.form.tags.SetValue(value)
+	case 2:
+		m.form.description.SetValue(value)
+	case 3:
+		m.form.blob.SetValue(value)
+		m.form.blobDirty = value != m.form.blobInitial
+		m.form.blobPasted = ""
+		m.form.blobPasteActive = false
+	}
+}
+
+func (m *Model) restoreFocusedFormValue() {
+	switch m.form.focus {
+	case 0:
+		m.form.name.SetValue(m.form.nameInitial)
+	case 1:
+		m.form.tags.SetValue(m.form.tagsInitial)
+	case 2:
+		m.form.description.SetValue(m.form.descriptionInitial)
+	case 3:
+		m.setFocusedFormValue(m.form.blobInitial)
+	}
 }
 
 func (m *Model) focusForm() {
@@ -870,12 +913,12 @@ func (m Model) View() string {
 				lines = append(lines, statusLine)
 			}
 			lines = append(lines,
-				renderActionBar(m.width, "Tab Next", "Ctrl+S Save"),
-				renderActionBar(m.width, "Ctrl+T Tags", "Esc Cancel", "F10 Quit"),
+				renderActionBar(m.width, "Tab Next", "Ctrl+U Clear field", "Ctrl+R Restore"),
+				renderActionBar(m.width, "Ctrl+T Tags", "Ctrl+S Save", "Esc Cancel", "F10 Quit"),
 			)
 			return m.fitView(strings.Join(lines, "\n"))
 		}
-		formActions := renderActionBar(m.width, "Tab/Shift+Tab Next", "Ctrl+T Select tags", "Ctrl+S Save", "Esc Cancel")
+		formActions := renderActionBar(m.width, "Tab Next", "Ctrl+U Clear field", "Ctrl+R Restore", "Ctrl+T Tags", "Ctrl+S Save", "Esc Cancel")
 		return m.fitView(strings.Join([]string{header, formTitle, m.form.name.View(), m.form.tags.View(), parameterStyle.Render("Description:"), m.form.description.View(), parameterStyle.Render("Blob (stored unchanged):"), m.form.blob.View(), statusLine, formActions}, "\n"))
 	case modeDelete:
 		deleteActions := renderActionBar(modalActionWidth, "Y Delete", "N Cancel", "Esc Cancel")
