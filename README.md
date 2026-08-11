@@ -7,7 +7,7 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 
 
 > [!IMPORTANT]
-> SecretTUIVault does **not** encrypt, decrypt, validate, or execute blob content. It never invokes GPG. Encrypt sensitive plaintext externally before adding it to a vault. Names, descriptions, and tags are stored in plaintext and must not contain passwords, PINs, recovery answers, or other secret material.
+> SecretTUIVault never encrypts or modifies blob content. Encryption remains external. On explicit request with `D`, it can pass the exact selected blob to a local GnuPG 2.x process for temporary, view-only decryption. GnuPG Agent and Pinentry alone handle passphrases; SecretTUIVault never requests, receives, or stores them. Names, descriptions, and tags are stored in plaintext and must not contain passwords, PINs, recovery answers, or other secret material.
 
 ## Features
 
@@ -20,14 +20,14 @@ SecretTUIVault is a lightweight, offline terminal user interface for organizing 
 - Fuzzy metadata search with field filters, quoted terms, OR, and AND
 - Conflict prompt before overwriting an externally changed vault
 - Atomic saves, one previous-version backup, and restrictive Unix permissions
-- No server, database, runtime network access, telemetry, or GPG integration; optional local clipboard copy with a manual fallback
+- No server, database, runtime network access, or telemetry; optional local clipboard copy and explicit local GPG decryption
 - Builds for Linux, macOS, and Windows
 
 ## Requirements
 
 - Go 1.26 or newer to build from source
 - A UTF-8 terminal with color and function-key support
-- GPG is optional and external; SecretTUIVault never calls it
+- GnuPG 2.x is optional and only required for `D` decryption; `gpg` must be available on `PATH` with a working GPG Agent and Pinentry setup
 - Clipboard copy on Linux/Unix needs `wl-clipboard` (`wl-copy`/`wl-paste`) on Wayland or `xclip`/`xsel` on X11. macOS and Windows need no additional clipboard package.
 
 ## Installation from source
@@ -105,6 +105,7 @@ The bottom status line shows the YAML path, current on-disk size, and status mes
 - `/`: focus search
 - `Enter` or `F3`: open the complete selected entry in a view up to 80 columns wide
 - `B` in the main or F3 view: copy the exact selected blob to the operating-system clipboard. Success is reported in the status line. If clipboard access fails, a borderless blob-only view opens for manual selection; `B`, `Esc`, or `Enter` returns to the previous view.
+- `D` in the main or F3 view: pass the exact selected blob to `gpg --decrypt` through standard input and show the text result in a scrollable, view-only modal. GPG Agent/Pinentry handles any passphrase prompt. `Esc` cancels a running operation; `Esc` or `Enter` closes a result.
 - `F4`: edit the selected entry
 - `F5`: create an entry
 - `F8`: open deletion confirmation; only `Y` deletes, while `N` or `Esc` cancels (`Enter` does nothing)
@@ -118,7 +119,7 @@ The bottom status line shows the YAML path, current on-disk size, and status mes
 
 The `Entries` panel always reserves an `↑` line above and a `↓` line below its visible rows. An arrow is gray at the corresponding boundary and turns cyan when additional entries exist beyond that edge.
 
-All available keyboard actions are rendered as individual bold, true-black-on-cyan blocks in the main footer and in view, edit, create, tag, delete, conflict, and confirmation screens. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
+All available keyboard actions are rendered as individual bold, true-black-on-cyan blocks in the main footer and in view, edit, create, tag, delete, conflict, decryption, and confirmation screens. Terminal bracketed paste can be used in multiline description and blob fields. SecretTUIVault writes to the operating-system clipboard only when `B` is pressed; it never reads clipboard content.
 
 On Linux/Unix, a missing or unusable `wl-copy`, `xclip`, or `xsel` command is reported after returning from the automatic borderless fallback view. Install the clipboard utility appropriate for the active desktop session and ensure its display environment (`WAYLAND_DISPLAY` or `DISPLAY`) is available.
 
@@ -186,11 +187,14 @@ The YAML file is intentionally readable and diff-friendly, but edit it carefully
 - Metadata and tags are plaintext.
 - Blob content is opaque; plaintext is accepted if supplied.
 - Pressing `B` sends the exact blob to the operating-system clipboard. Clipboard managers, history, synchronization, and other applications may retain or read it; use this feature only when that exposure is acceptable.
+- Pressing `D` starts `gpg --batch --no-tty --pinentry-mode ask --status-fd 2 --decrypt` directly without a shell and supplies the exact blob through standard input. No passphrase option or loopback Pinentry mode is used.
+- Decrypted text is kept only in memory for the temporary view, is never written to YAML or automatically copied, and is discarded from the UI model when the view closes. Output is limited to 8 MiB; binary or non-UTF-8 plaintext is rejected.
+- Signature state reported by GPG is shown as `none`, `valid`, `invalid`, or `unverified` above the decrypted text. Invalid or unverifiable signatures are warnings and are not silently presented as valid.
 - The complete selected blob is displayed in the terminal.
 - Shell history, terminal scrollback, screenshots, backups, Git history, and filesystem copies remain outside the application's control.
 - A backup contains the complete previous vault and needs the same protection.
 - This is a local, single-user application; it provides conflict detection, not collaborative merge or synchronization.
-- Runtime behavior is offline. Go modules and CI need network access only while building.
+- Runtime behavior remains offline; optional decryption only starts the local `gpg` process and its configured GPG Agent/Pinentry. Go modules and CI need network access only while building.
 - Vault input is limited to 64 MiB to avoid unbounded memory use from malformed local files.
 
 ## Development

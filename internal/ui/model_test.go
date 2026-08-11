@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -13,6 +14,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/muesli/termenv"
+	internalgpg "github.com/tseiman/SecretTUIVault/internal/gpg"
 	"github.com/tseiman/SecretTUIVault/internal/vault"
 )
 
@@ -76,7 +78,7 @@ func TestFooterActionsUseInverseCyanBlocks(t *testing.T) {
 	m := New(uiDocument(t), &fakeSaver{})
 	m, _ = update(m, tea.WindowSizeMsg{Width: 80, Height: 24})
 	view := m.View()
-	for _, action := range []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"} {
+	for _, action := range []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "D Decrypt", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"} {
 		if !strings.Contains(view, action) {
 			t.Fatalf("footer action %q missing: %q", action, view)
 		}
@@ -472,6 +474,7 @@ func TestEveryModeFitsNarrowTerminal(t *testing.T) {
 		for label, mode := range map[string]mode{
 			"delete": modeDelete, "conflict": modeConflict, "tags": modeTags,
 			"new-tag": modeNewTag, "quit": modeQuitConfirm, "view": modeView,
+			"decrypting": modeDecrypting, "decrypted": modeDecrypted,
 		} {
 			modal := m
 			modal.mode = mode
@@ -739,5 +742,84 @@ func TestRenderedVaultTextCannotEmitTerminalControls(t *testing.T) {
 		if !strings.Contains(view, "\\x1b") {
 			t.Fatalf("escaped control representation missing: %q", view)
 		}
+	}
+}
+
+func TestDecryptFromListUsesExactBlobAndShowsScrollableResult(t *testing.T) {
+	doc := uiDocument(t)
+	doc.Entries[0].Blob = "armored\r\nblob\n"
+	m := New(doc, &fakeSaver{})
+	var received string
+	m.decrypt = func(_ context.Context, input []byte) (internalgpg.Result, error) {
+		received = string(input)
+		return internalgpg.Result{Plaintext: "plain\x1btext\nsecond line", Signature: internalgpg.SignatureValid}, nil
+	}
+
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'D'}})
+	if m.mode != modeDecrypting || cmd == nil {
+		t.Fatalf("decrypt start mode=%v cmd=%v", m.mode, cmd)
+	}
+	m, _ = update(m, cmd())
+	if received != doc.Entries[0].Blob {
+		t.Fatalf("GPG input = %q, want exact blob %q", received, doc.Entries[0].Blob)
+	}
+	if m.mode != modeDecrypted {
+		t.Fatalf("result mode=%v", m.mode)
+	}
+	view := m.View()
+	for _, want := range []string{"Signature: valid", `plain\x1btext`, "second line", "↑↓ Scroll", "Esc/Enter Close"} {
+		if !strings.Contains(view, want) {
+			t.Fatalf("decrypted view missing %q: %q", want, view)
+		}
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeList || m.decryptedPlaintext != "" {
+		t.Fatalf("close mode=%v retained=%q", m.mode, m.decryptedPlaintext)
+	}
+}
+
+func TestDecryptFromF3ReturnsToF3(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m.decrypt = func(context.Context, []byte) (internalgpg.Result, error) {
+		return internalgpg.Result{Plaintext: "plaintext", Signature: internalgpg.SignatureNone}, nil
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyF3})
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, _ = update(m, cmd())
+	if m.mode != modeDecrypted || !strings.Contains(m.View(), "Signature: none") {
+		t.Fatalf("decrypt view mode=%v view=%q", m.mode, m.View())
+	}
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEnter})
+	if m.mode != modeView {
+		t.Fatalf("close mode=%v, want F3 view", m.mode)
+	}
+}
+
+func TestDecryptFailureReturnsToOriginWithoutPlaintext(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m.decrypt = func(context.Context, []byte) (internalgpg.Result, error) {
+		return internalgpg.Result{}, errors.New("no matching secret key")
+	}
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, _ = update(m, cmd())
+	if m.mode != modeList || !strings.Contains(m.status, "GPG decryption failed") || m.decryptedPlaintext != "" {
+		t.Fatalf("failure mode=%v status=%q plaintext=%q", m.mode, m.status, m.decryptedPlaintext)
+	}
+}
+
+func TestEscapeCancelsRunningDecryptAndIgnoresItsLateResult(t *testing.T) {
+	m := New(uiDocument(t), &fakeSaver{})
+	m.decrypt = func(ctx context.Context, _ []byte) (internalgpg.Result, error) {
+		<-ctx.Done()
+		return internalgpg.Result{}, ctx.Err()
+	}
+	m, cmd := update(m, tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	m, _ = update(m, tea.KeyMsg{Type: tea.KeyEsc})
+	if m.mode != modeList || m.status != "GPG decryption cancelled" {
+		t.Fatalf("cancel mode=%v status=%q", m.mode, m.status)
+	}
+	m, _ = update(m, cmd())
+	if m.mode != modeList || m.status != "GPG decryption cancelled" {
+		t.Fatalf("late result changed state: mode=%v status=%q", m.mode, m.status)
 	}
 }

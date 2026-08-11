@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
+	internalgpg "github.com/tseiman/SecretTUIVault/internal/gpg"
 	"github.com/tseiman/SecretTUIVault/internal/search"
 	"github.com/tseiman/SecretTUIVault/internal/vault"
 )
@@ -37,6 +39,12 @@ type clipboardResultMsg struct {
 	err   error
 }
 
+type decryptResultMsg struct {
+	id     uint64
+	result internalgpg.Result
+	err    error
+}
+
 const (
 	modeList mode = iota
 	modeView
@@ -47,6 +55,8 @@ const (
 	modeTags
 	modeNewTag
 	modeQuitConfirm
+	modeDecrypting
+	modeDecrypted
 )
 
 type formModel struct {
@@ -64,35 +74,41 @@ type formModel struct {
 }
 
 type Model struct {
-	doc            vault.Document
-	store          saver
-	metadata       vaultMetadata
-	homeDir        string
-	visible        []vault.Entry
-	selected       int
-	listOffset     int
-	ascending      bool
-	query          textinput.Model
-	detail         viewport.Model
-	form           formModel
-	tagOptions     []string
-	tagOrder       []string
-	tagSelected    map[string]bool
-	tagCursor      int
-	tagOffset      int
-	tagAscending   bool
-	newTag         textinput.Model
-	mode           mode
-	returnMode     mode
-	escapePrefix   bool
-	pending        *vault.Document
-	status         string
-	width          int
-	height         int
-	gitVersion     string
-	writeClipboard func(string) error
-	manualBlob     string
-	now            func() time.Time
+	doc                vault.Document
+	store              saver
+	metadata           vaultMetadata
+	homeDir            string
+	visible            []vault.Entry
+	selected           int
+	listOffset         int
+	ascending          bool
+	query              textinput.Model
+	detail             viewport.Model
+	decryptedView      viewport.Model
+	form               formModel
+	tagOptions         []string
+	tagOrder           []string
+	tagSelected        map[string]bool
+	tagCursor          int
+	tagOffset          int
+	tagAscending       bool
+	newTag             textinput.Model
+	mode               mode
+	returnMode         mode
+	escapePrefix       bool
+	pending            *vault.Document
+	status             string
+	width              int
+	height             int
+	gitVersion         string
+	writeClipboard     func(string) error
+	decrypt            func(context.Context, []byte) (internalgpg.Result, error)
+	decryptCancel      context.CancelFunc
+	decryptID          uint64
+	decryptSignature   internalgpg.SignatureStatus
+	decryptedPlaintext string
+	manualBlob         string
+	now                func() time.Time
 }
 
 func New(doc vault.Document, store saver) Model {
@@ -101,8 +117,10 @@ func New(doc vault.Document, store saver) Model {
 	q.Prompt = "Search: "
 	q.Placeholder = `text, TAG:value, NAME:"words", AND`
 	d := viewport.New(40, 10)
+	decrypted := viewport.New(40, 10)
 	homeDir, _ := os.UserHomeDir()
-	m := Model{doc: doc, store: store, homeDir: homeDir, ascending: true, tagAscending: true, query: q, detail: d, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, now: time.Now}
+	gpgRunner := internalgpg.NewRunner()
+	m := Model{doc: doc, store: store, homeDir: homeDir, ascending: true, tagAscending: true, query: q, detail: d, decryptedView: decrypted, width: 80, height: 24, gitVersion: detectGitVersion(), writeClipboard: clipboard.WriteAll, decrypt: gpgRunner.Decrypt, now: time.Now}
 	if metadata, ok := store.(vaultMetadata); ok {
 		m.metadata = metadata
 	}
@@ -121,6 +139,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = fmt.Sprintf("Zwischenablage nicht verfügbar: %v; manueller Kopiermodus geöffnet", result.err)
 		m.manualBlob = result.value
 		m.mode = modeBlobCopy
+		m.resizeWidgets()
+		return m, nil
+	}
+	if result, ok := msg.(decryptResultMsg); ok {
+		if result.id != m.decryptID {
+			return m, nil
+		}
+		m.decryptCancel = nil
+		if result.err != nil {
+			m.mode = m.returnMode
+			m.decryptedPlaintext = ""
+			m.status = "GPG decryption failed: " + result.err.Error()
+			return m, nil
+		}
+		m.decryptedPlaintext = result.result.Plaintext
+		m.decryptSignature = result.result.Signature
+		m.decryptedView.SetContent(safeMultiline(result.result.Plaintext))
+		m.decryptedView.GotoTop()
+		m.mode, m.status = modeDecrypted, ""
 		m.resizeWidgets()
 		return m, nil
 	}
@@ -151,6 +188,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	if key.Type == tea.KeyF10 {
+		if m.mode == modeDecrypting && m.decryptCancel != nil {
+			m.decryptCancel()
+			m.decryptCancel = nil
+		}
 		if m.mode == modeForm || m.mode == modeConflict || m.mode == modeTags || m.mode == modeNewTag {
 			m.returnMode, m.mode = m.mode, modeQuitConfirm
 			return m, nil
@@ -186,6 +227,27 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.mode = m.returnMode
 		}
 		return m, nil
+	case modeDecrypting:
+		if key.Type == tea.KeyEsc {
+			if m.decryptCancel != nil {
+				m.decryptCancel()
+			}
+			m.decryptCancel = nil
+			m.decryptID++
+			m.mode, m.status = m.returnMode, "GPG decryption cancelled"
+		}
+		return m, nil
+	case modeDecrypted:
+		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter {
+			m.mode = m.returnMode
+			m.decryptedPlaintext = ""
+			m.decryptedView.SetContent("")
+			m.resizeWidgets()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.decryptedView, cmd = m.decryptedView.Update(key)
+		return m, cmd
 	case modeView:
 		if key.Type == tea.KeyEsc || key.Type == tea.KeyEnter || key.Type == tea.KeyF3 {
 			m.mode = modeList
@@ -195,6 +257,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.EqualFold(key.String(), "b") {
 			m.returnMode = modeView
 			return m, m.copyBlobCmd()
+		}
+		if strings.EqualFold(key.String(), "d") {
+			return m.startDecrypt(modeView)
 		}
 		var cmd tea.Cmd
 		m.detail, cmd = m.detail.Update(key)
@@ -253,6 +318,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.returnMode = modeList
 				return m, m.copyBlobCmd()
 			}
+		case "d", "D":
+			if len(m.visible) > 0 {
+				return m.startDecrypt(modeList)
+			}
 		case "s", "S":
 			id := m.selectedID()
 			m.ascending = !m.ascending
@@ -282,6 +351,22 @@ func (m Model) copyBlobCmd() tea.Cmd {
 	write := m.writeClipboard
 	return func() tea.Msg {
 		return clipboardResultMsg{value: value, err: write(value)}
+	}
+}
+
+func (m Model) startDecrypt(returnMode mode) (tea.Model, tea.Cmd) {
+	ctx, cancel := context.WithCancel(context.Background())
+	m.decryptID++
+	id := m.decryptID
+	input := append([]byte(nil), []byte(m.selectedEntry().Blob)...)
+	decrypt := m.decrypt
+	m.returnMode = returnMode
+	m.decryptCancel = cancel
+	m.decryptedPlaintext = ""
+	m.mode, m.status = modeDecrypting, "Waiting for GPG Pinentry"
+	return m, func() tea.Msg {
+		result, err := decrypt(ctx, input)
+		return decryptResultMsg{id: id, result: result, err: err}
 	}
 }
 
@@ -679,9 +764,10 @@ func (m *Model) resizeWidgets() {
 	left := max(18, m.width/3)
 	right := max(18, m.width-left-5)
 	m.query.Width = max(8, m.width-10)
-	if m.mode == modeView || m.mode == modeBlobCopy {
+	if m.mode == modeView || m.mode == modeBlobCopy || m.mode == modeDecrypted {
 		outerWidth := min(80, m.width)
 		m.detail.Width, m.detail.Height = max(8, outerWidth-6), max(3, m.height-9)
+		m.decryptedView.Width, m.decryptedView.Height = max(8, outerWidth-6), max(3, m.height-11)
 	} else {
 		m.detail.Width, m.detail.Height = right-4, max(3, m.height-9)
 	}
@@ -755,8 +841,10 @@ func (m Model) View() string {
 	header := m.renderHeader()
 	searchLine := mutedStyle.Render("Sort: "+sortLabel(m.ascending)+"  ") + m.query.View()
 	searchLine = ansi.Truncate(searchLine, max(1, m.width), "…")
-	actions := []string{"↑↓ Navigate", "/ Search", "S Sort", "B Copy", "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"}
-	footer := renderActionBar(m.width, actions...)
+	footer := strings.Join([]string{
+		renderActionBar(m.width, "↑↓ Navigate", "/ Search", "S Sort", "B Copy", "D Decrypt"),
+		renderActionBar(m.width, "F3 View", "F4 Edit", "F5 New", "F8 Delete", "F10 Quit"),
+	}, "\n")
 	statusMessage := safeInline(m.status)
 	if strings.Contains(strings.ToLower(statusMessage), "error") || strings.Contains(strings.ToLower(statusMessage), "must") || strings.Contains(strings.ToLower(statusMessage), "disk") {
 		statusMessage = errorStyle.Render(statusMessage)
@@ -821,8 +909,18 @@ func (m Model) View() string {
 	case modeQuitConfirm:
 		quitActions := renderActionBar(modalActionWidth, "Q/Y Quit", "Enter/Esc/C Continue editing")
 		return m.fitView(header + "\n" + m.renderModal("Discard unsaved changes and quit?\n"+quitActions))
+	case modeDecrypting:
+		decryptActions := renderActionBar(modalActionWidth, "Esc Cancel", "F10 Quit")
+		return m.fitView(header + "\n" + m.renderModal("Decrypting with GPG\n\nWaiting for GPG Agent / Pinentry…\n\n"+decryptActions))
+	case modeDecrypted:
+		signature := "Signature: " + string(m.decryptSignature)
+		if m.decryptSignature == internalgpg.SignatureInvalid || m.decryptSignature == internalgpg.SignatureUnverified {
+			signature = errorStyle.Render(signature)
+		}
+		decryptActions := renderActionBar(modalActionWidth, "↑↓ Scroll", "Esc/Enter Close", "F10 Quit")
+		return m.fitView(header + "\n" + m.renderModal("Decrypted text\n"+signature+"\n\n"+m.decryptedView.View()+"\n\n"+decryptActions))
 	case modeView:
-		viewFooter := renderActionBar(modalActionWidth, "↑↓ Scroll", "B Copy blob", "Esc/Enter Close")
+		viewFooter := renderActionBar(modalActionWidth, "↑↓ Scroll", "B Copy blob", "D Decrypt", "Esc/Enter Close")
 		if status != "" {
 			viewFooter = status + "\n\n" + viewFooter
 		}
